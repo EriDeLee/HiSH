@@ -58,22 +58,17 @@ static QemuSystemEntry getQemuSystemEntry(bool supportJit) {
         return qemuSystemEntry;
     }
 
-    // 根据设备类型选择 .so：phone 用 TCI，tablet/2in1 用 JIT
+    // 统一优先加载 JIT 版本；TCI 版本仅作为兜底（当前构建默认不产出 TCI 库）
     void *libQemuHandle = nullptr;
 
-    if (supportJit) {
-        // tablet/2in1: 直接加载 JIT 版本
-        OH_LOG_INFO(LOG_APP, "Loading QEMU: libqemu-system-aarch64.so (JIT)");
-        libQemuHandle = dlopen("libqemu-system-aarch64.so", RTLD_LAZY);
-    } else {
-        // phone: 优先加载 TCI 版本，失败则回退到 JIT 版本
+    OH_LOG_INFO(LOG_APP, "Loading QEMU: libqemu-system-aarch64.so (JIT)");
+    libQemuHandle = dlopen("libqemu-system-aarch64.so", RTLD_LAZY);
+    if (!libQemuHandle) {
+        OH_LOG_INFO(LOG_APP, "JIT load failed (errno=%{public}d), falling back to TCI", errno);
         OH_LOG_INFO(LOG_APP, "Loading QEMU: libqemu-system-aarch64-tci.so (TCI)");
         libQemuHandle = dlopen("libqemu-system-aarch64-tci.so", RTLD_LAZY);
-        if (!libQemuHandle) {
-            OH_LOG_INFO(LOG_APP, "TCI load failed (errno=%{public}d), falling back to JIT", errno);
-            libQemuHandle = dlopen("libqemu-system-aarch64.so", RTLD_LAZY);
-        }
     }
+    (void)supportJit; // 保留参数签名，加载策略已与设备类型解耦
 
     if (!libQemuHandle) {
         OH_LOG_INFO(LOG_APP, "Failed to load libqemu.so errno: %{public}d", errno);
@@ -933,7 +928,6 @@ void serial_output_worker(const char *unix_socket_path) {
                 auto hex = convert_to_hex(buffer, r);
                 //  call callback registered by ArkTS
                 on_serial_data_received(hex);
-                OH_LOG_INFO(LOG_APP, "Received, data: %{public}s", hex.c_str());
             } else if (r < 0) {
                 OH_LOG_INFO(LOG_APP, "Program exited, %{public}ld %{public}d", r, errno);
                 broken = true;
@@ -1079,9 +1073,8 @@ static napi_value sendInput(napi_env env, napi_callback_info info) {
     }
 
     // P0-06修复: 将ret改为length
-    std::string hex = convert_to_hex(data, length);
-    OH_LOG_INFO(LOG_APP, "Send, data: %{public}s", hex.c_str());
-
+    // 注意：此处不再做 convert_to_hex —— 该转换原先只服务于已删除的调试日志，
+    // 却要在每次键盘输入时把数据膨胀 4 倍，属于纯粹的浪费。
     int written = 0;
     while (written < (int)length)
     {
