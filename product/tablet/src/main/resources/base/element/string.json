@@ -1,8 +1,16 @@
 {
   "string": [
-    {"name": "module_desc","value": "HiSH, Run Linux Shell on HarmonyOS"},
-    {"name": "EntryAbility_desc","value": "HiSH, Run Linux Shell on HarmonyOS"},
-    {"name": "EntryAbility_label","value": "HiSH Dev"},
-    {"name": "location_reason","value": "Keep background running requires location permission"}
+    {
+      "name": "module_desc",
+      "value": "HiSH native terminal"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "HiSH native terminal"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HiSH Dev"
+    }
   ]
 }

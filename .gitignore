@@ -1,27 +1,64 @@
-/node_modules
-**/oh_modules
+# Dependency stores (keep oh-package-lock.json5 and vendored source).
+node_modules/
+oh_modules/
+
+# Hvigor, CMake and finite-test outputs.
+build/
+.hvigor/
+.cxx/
+.test/
+.appanalyzer/
+BuildProfile.ets
+
+# Per-machine settings; build-profile.template.json5 stays visible.
 /local.properties
-/.idea
-**/build
-/.hvigor
-.cxx
-/.clangd
-/.clang-format
-/.clang-tidy
-**/.test
-/.appanalyzer
 /build-profile.json5
 /build-profile.json5.*
+.idea/
+.vscode/
+/.clangd/
+
+# Local agent/editor state, not project instructions under docs/.
+.claude/
+.bitfun/
+.temp/
+/.hallmark/
+
+# Generated application/native binaries. Do not ignore all of bench/ or *.bin.
 *.hap
+*.hsp
+*.har
+*.app
+*.abc
 *.so
-*.so.0
-.idea
-**/BuildProfile.ets
-/entry
+*.so.[0-9]*
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.exe
+*.dll
+/bench/hishbench
+/bench/hishbench-musl-dyn
+/bench/hishbench-musl-static
 
-.temp
-.bitfun
+# Signing credentials and private local logs; never read these for an audit.
+.env
+.env.*
+!.env.example
+*.p7b
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.key
+sign-private.txt
+signing-env.*
 
-.claude
-.vscode
-.temp
+# OS metadata.
+.DS_Store
+Thumbs.db
+Desktop.ini

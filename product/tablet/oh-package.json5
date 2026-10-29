@@ -1,7 +1,7 @@
 {
   "name": "tablet",
   "version": "1.0.0",
-  "description": "HiSH tablet/2in1 entry (with JIT)",
+  "description": "HiSH native tablet terminal",
   "main": "",
   "author": "",
   "license": "",

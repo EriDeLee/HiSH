@@ -2,6 +2,7 @@
 // The Terminal instance is created lazily in initialize() (see createTerminal),
 // because renderer options depend on native preferences (ligatures / italic).
 var term = null;
+var nativeSelection = null;
 
 // Tracks the currently selected font family so user fonts can re-apply it
 // once their FontFace finishes loading asynchronously.
@@ -9,14 +10,12 @@ var currentFontFamily = 'Default';
 
 // Initialize Addons (constructed upfront; attached to term in createTerminal)
 const fitAddon = new FitAddon.FitAddon();
-const webglAddon = new WebglAddon.WebglAddon();
 
 // Initialize exports for ArkTS to call
 window.exports = {};
 
-// Helper for decoding Latin1/Binary string from ArkTS to UTF-8
+// Clipboard bytes are decoded once; process output stays binary for xterm's streaming decoder.
 const decoder = new TextDecoder('utf-8');
-const encoder = new TextEncoder();
 
 function setupImeGuard() {
     if (!term.textarea) {
@@ -99,9 +98,21 @@ function detectAvailableMonospaceFonts() {
 // named fonts include a monospace fallback for safety.
 function mapFontFamily(family) {
     if (!family || family === 'Default') {
-        return 'monospace, "Droid Sans Mono", "Courier New", "Courier", monospace';
+        return 'monospace';
     }
-    return '"' + family + '", monospace';
+    return JSON.stringify(family) + ', monospace';
+}
+
+let fitFrame = null;
+let terminalObserver = null;
+function scheduleFit() {
+    if (fitFrame !== null) return;
+    fitFrame = requestAnimationFrame(() => {
+        fitFrame = null;
+        const container = document.getElementById('terminal-container');
+        if (!term || !container || container.clientWidth < 1 || container.clientHeight < 1) return;
+        try { fitAddon.fit(); } catch (error) { console.warn('Terminal fit failed', error); }
+    });
 }
 
 // Function to convert "binary string" (where charCode < 256) to Uint8Array
@@ -140,15 +151,16 @@ function createTerminal() {
     }
 
     var options = {
-        cursorBlink: true,
+        convertEol: true, // Pipe mode has no PTY output discipline to supply CR.
+        cursorBlink: false,
         allowProposedApi: true, // Needed for some addons
         allowTransparency: true, // User preference: Transparency supported
-        fontFamily: 'monospace, "Droid Sans Mono", "Courier New", "Courier", monospace',
+        fontFamily: mapFontFamily('Default'),
         fontSize: 14, // Default, will be overridden by native.getFontSize()
         theme: {
-            background: 'rgba(0, 0, 0, 0)', // Transparent by default to show effects behind
-            foreground: '#ffffff',
-            cursor: '#ffffff'
+            background: 'transparent',
+            foreground: HiSHAppearance.tokens.lightInk,
+            cursor: HiSHAppearance.tokens.lightInk
         },
         screenReaderMode: false, // Disabled to fix touch scrolling issues (was conflicting with native selection)
         scrollback: 3000, // [Optimization] Limit scrollback to 3000 lines (Ring Buffer) to prevent memory overflow
@@ -175,9 +187,6 @@ window.onload = function () {
     const maxRetries = 10;
 
     function initialize() {
-        // Disable WebGL as per user request (Compatibility Mode)
-        let shouldEnableWebGL = false;
-
         // Check if native is ready
         if (!window.native && retryCount < maxRetries) {
             console.log(`Waiting for native object... (${retryCount + 1}/${maxRetries})`);
@@ -187,7 +196,7 @@ window.onload = function () {
         }
 
         // Initial fit with a slight delay to ensure container is ready
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             // 0. Create terminal and open it
             try {
                 createTerminal();
@@ -200,7 +209,7 @@ window.onload = function () {
 
             // 1. Setup event listeners and sync preferences FIRST
             //    确保 term.onResize 在 fitAddon.fit() 之前设置好，
-            //    这样首次 fit 的 resize 事件才能触发 native.resize() 发送给 VM 内核
+            //    这样首次 fit 的 resize 事件才能触发 native.resize() 更新原生终端尺寸
             try {
                 syncPrefs();
                 setupEventListeners();
@@ -235,6 +244,7 @@ window.onload = function () {
                     if (native.onAvailableFontsDetected) {
                         native.onAvailableFontsDetected(JSON.stringify(availableFonts));
                     }
+                    scheduleFit();
                 };
                 if (preloadPromises.length > 0) {
                     // Wait up to 2s for fonts to load, then run detection
@@ -264,29 +274,8 @@ window.onload = function () {
                 term.resize(80, 24); // Fallback
             }
 
-            // 4. Load WebGL (unavailable in this DOM-renderer-only build)
-            if (shouldEnableWebGL) {
-                try {
-                    webglAddon.onContextLoss(e => {
-                        webglAddon.dispose();
-                    });
-                    term.loadAddon(webglAddon);
-                    console.log("WebGL renderer loaded");
-                } catch (e) {
-                    console.warn("WebGL renderer failed to load, falling back to canvas", e);
-                }
-            }
-
             // 5. Initialize and Start Shell
             try {
-                // Restore HiSH Startup Logo
-                term.writeln(
-                    'HiSH is starting...\r\n\r\n' +
-                    '     |  | _)   __|  |  |\r\n' +
-                    '     __ |  | \\__ \\  __ |\r\n' +
-                    '    _| _| _| ____/ _| _|\r\n'
-                );
-
                 // Notify native that we are ready
                 if (window.native && native.load) {
                     native.load();
@@ -298,7 +287,7 @@ window.onload = function () {
                 console.error("Error during init/load", e);
             }
 
-        }, 300); // 300ms delay to ensure container is ready
+        });
     }
 
     // Start initialization
@@ -317,7 +306,7 @@ function syncPrefs() {
         }
         if (native.getCursorBlink) {
             const blink = native.getCursorBlink();
-            if (blink) term.options.cursorBlink = blink;
+            if (typeof blink === 'boolean') term.options.cursorBlink = blink;
         }
         if (native.getCursorShape) {
             const shape = native.getCursorShape();
@@ -358,9 +347,9 @@ function registerUserFonts(json) {
 exports.registerUserFonts = registerUserFonts;
 
 function setupEventListeners() {
-    // 1. Input from User (Keyboard/Mouse) -> Send to VM
+    // 1. Unicode input -> native process (ArkTS encodes UTF-8 once)
     term.onData(data => {
-        // Pass data directly to native (matching original hterm behavior)
+        // Pass Unicode directly to the native bridge.
         if (native && native.sendInput) {
             native.sendInput(data);
         }
@@ -373,150 +362,46 @@ function setupEventListeners() {
         }
     });
 
-    // 3. Selection Change -> Notify Native
-    term.onSelectionChange(() => {
-        const text = term.getSelection();
-        if (native && native.onSelectionChange) {
-            native.onSelectionChange(text);
-        }
-    });
+    nativeSelection = HiSHNativeSelection.attach(term);
 
     // 4. Handle Window Resize
-    window.addEventListener('resize', () => {
-        setTimeout(() => fitAddon.fit(), 100);
-    });
-
-    // 5. Prevent default browser behaviors that might interfere
-    document.addEventListener('keydown', (e) => {
-        // Allow some system shortcuts if needed, but generally intercept
-        if (e.ctrlKey || e.altKey || (e.keyCode >= 112 && e.keyCode <= 123)) {
-            // Let xterm handle it or prevent default
-        }
-    }, { passive: false });
-
-    // Prevent scrolling/bouncing on mobile
-    document.addEventListener('touchmove', (e) => {
-        if (e.touches.length > 1) return; // Allow pinch zoom if not handled by CSS
-        // e.preventDefault(); // DISABLED: Allow native text selection gestures
-    }, { passive: false });
-
-    // --- EVENT SHIELD: Force Native Context Menu (Global Capture) ---
-    // This listener runs in the CAPTURE phase on the DOCUMENT.
-    // It intercepts the 'contextmenu' event BEFORE it reaches xterm.js.
-    // We stop it from propagating to xterm, but allow the default browser behavior (menu).
-
-    document.addEventListener('contextmenu', (e) => {
-        // Only intercept if inside the terminal
-        if (e.target.closest('#terminal')) {
-            e.stopImmediatePropagation(); // Kill it before xterm sees it
-            // e.preventDefault(); // DO NOT CALL THIS! We want the menu!
-            return true;
-        }
-    }, true); // true = Capture Phase
-
-    console.log("Global ContextMenu Interceptor activated");
-}
-
-// Fix for mouse/touch coordinates when the terminal is visually flipped
-function setupMirroredInputFix(termEl) {
-    const fixEvent = (e) => {
-        if (!termEl.classList.contains('webgl-mobile-fix')) return;
-
-        // If the event was already fixed, skip
-        if (e._fixed) return;
-
-        const rect = termEl.getBoundingClientRect();
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientY = e.touches[0].clientY;
-        }
-
-        // Calculate relative Y and flip it
-        const relativeY = clientY - rect.top;
-        const flippedY = rect.height - relativeY;
-        const newClientY = rect.top + flippedY;
-
-        // We can't easily modify clientY of a native event, 
-        // but xterm.js uses offsetX/offsetY or calculates from clientX/Y.
-        // This is a complex area. A simpler way is to use a proxy element or 
-        // just warn the user that touch selection might be inverted.
-        console.log("Input coordinates might need inversion due to WebGL fix");
-    };
-
-    // termEl.addEventListener('mousedown', fixEvent, true);
-    // termEl.addEventListener('touchstart', fixEvent, true);
-}
-
-// --- Implementation of exports matching term.js.bak ---
-
-// exports.write(data) - Write data from VM to terminal
-exports.write = (data, applicationMode) => {
-    // legacy hterm code imply data is Binary String (UTF-8/Latin1 bytes)
-    try {
-        const uint8 = strToUint8Array(data);
-        term.write(uint8);
-        if (term.modes.applicationCursorKeysMode !== applicationMode) {
-            native.setApplicationMode(term.modes.applicationCursorKeysMode)
-        }
-    } catch (e) {
-        console.error("exports.write failed", e);
+    window.addEventListener('resize', scheduleFit);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleFit);
+    if (typeof ResizeObserver !== 'undefined') {
+        terminalObserver = new ResizeObserver(scheduleFit);
+        terminalObserver.observe(document.getElementById('terminal-container'));
     }
-};
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+}
 
+// Raw process output; never reinterpret backslash sequences printed by a command.
 exports.writeBase64 = (base64Data, applicationMode) => {
     try {
-        let binaryString = atob(base64Data);
-
-        // 兼容性修复：还原字面量转义序列 (Unescape)
-        // 支持 \xHH, \uHHHH, 以及常见 C 风格转义符 (\n, \r, \t, \', \", \\)
-        binaryString = binaryString.replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|.)/g, (match, param) => {
-            if (param[0] === 'x' || param[0] === 'u') {
-                return String.fromCharCode(parseInt(param.slice(1), 16));
-            }
-            switch (param) {
-                case 'n': return '\n';
-                case 'r': return '\r';
-                case 't': return '\t';
-                case 'b': return '\b';
-                case 'f': return '\f';
-                case 'v': return '\v';
-                case '0': return '\0';
-                default: return param; // For \' \" \\ and others, just return the char
-            }
-        });
-
-        const uint8 = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            uint8[i] = binaryString.charCodeAt(i);
-        }
-        term.write(uint8);
-
-        // Sync Application Cursor Mode using xterm.js state
-        if (term.modes.applicationCursorKeysMode !== applicationMode) {
-            if (native && native.setApplicationMode) {
+        const uint8 = strToUint8Array(atob(base64Data));
+        term.write(uint8, () => {
+            if (term.modes.applicationCursorKeysMode !== applicationMode && native && native.setApplicationMode) {
                 native.setApplicationMode(term.modes.applicationCursorKeysMode);
             }
-        }
+        });
     } catch (e) {
         console.error("exports.writeBase64 failed", e);
     }
 };
 
-exports.paste = (data) => {
-    if (native && native.sendInput) {
-        // If data is already binary string (UTF-8 bytes as chars), just send it.
-        native.sendInput(data);
-    }
+exports.pasteBase64 = (base64Data) => {
+    if (typeof nativeSelection !== 'undefined' && nativeSelection) nativeSelection.clear();
+    term.paste(decoder.decode(strToUint8Array(atob(base64Data))));
 };
 
 exports.copy = () => {
-    // xmm.js selection API
-    return term.getSelection();
+    const selected = window.getSelection();
+    return selected && !selected.isCollapsed ? selected.toString() : term.getSelection();
 };
 
 exports.setFontSize = (size) => {
+    if (!Number.isFinite(size) || size <= 0) return;
     term.options.fontSize = size;
-    fitAddon.fit();
+    scheduleFit();
 };
 
 exports.setFontFamily = (family) => {
@@ -529,7 +414,7 @@ exports.setFontFamily = (family) => {
     if (term.cols > 0 && term.rows > 0) {
         term.resize(term.cols, term.rows);
     }
-    fitAddon.fit();
+    scheduleFit();
 };
 
 exports.setCursorShape = (shape) => {
@@ -559,8 +444,11 @@ exports.setItalic = (enabled) => {
 // --- Terminal appearance: background color / image / gaussian blur ---
 
 exports.setBackgroundColor = (color) => {
-    if (!color) return;
-    document.body.style.backgroundColor = color;
+    const appearance = HiSHAppearance.background(color);
+    if (!appearance) return;
+    document.body.style.backgroundColor = appearance.css;
+    document.documentElement.style.setProperty('--terminal-ink', appearance.ink);
+    term.options.theme = appearance.theme;
 };
 
 exports.setBackgroundImage = (dataUrl) => {
@@ -612,6 +500,9 @@ exports.setFocused = (focus) => {
         term.blur();
     }
 };
+exports.setNativeLineMode = (convertEol) => {
+    term.options.convertEol = convertEol;
+};
 
 // Mock hterm.openUrl for compatibility if something calls it directly
 window.hterm = {
@@ -621,10 +512,15 @@ window.hterm = {
 };
 
 exports.selectAll = () => {
-    term.selectAll();
+    if (nativeSelection) nativeSelection.selectAll();
+};
+
+exports.clearSelection = () => {
+    if (nativeSelection) nativeSelection.clear();
 };
 
 // Clears the whole terminal buffer (viewport + scrollback)
 exports.clearScreen = () => {
+    if (nativeSelection) nativeSelection.clear();
     term.clear();
 };

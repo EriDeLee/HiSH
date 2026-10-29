@@ -1,126 +1,169 @@
-# minimum version of CMake.
-cmake_minimum_required(VERSION 3.5.0)
-project(hish)
-set(PROJECT_LANGUAGE C)
-if(DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_CXX_STANDARD 17)
-  list(APPEND PROJECT_LANGUAGES CXX)
-endif(DEFINED CMAKE_CXX_COMPILER)
-
-project(HiSH VERSION 1.0.0 LANGUAGES ${PROJECT_LANGUAGES})
-include(CheckFunctionExists)
-include(CheckSymbolExists)
-include(CheckIncludeFile)
-include(CheckTypeSize)
-include(TestBigEndian)
-include(CheckCSourceCompiles)
-include(CheckCSourceRuns)
-include(GNUInstallDirs)
-
-set(NATIVERENDER_ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-
+cmake_minimum_required(VERSION 3.19)
+project(hish_native LANGUAGES C CXX ASM)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(DEFINED PACKAGE_FIND_FILE)
-    include(${PACKAGE_FIND_FILE})
+  include(${PACKAGE_FIND_FILE})
 endif()
-
-# libvncclient paths
-set(COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libvncserver/src/common)
-set(LIBVNCCLIENT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libvncserver/src/libvncclient)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/libvncserver/cmake/Modules/")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Headers needed for check_type_size()
-check_include_file("vfork.h"       LIBVNCSERVER_HAVE_VFORK_H)
-check_include_file("ws2tcpip.h"    LIBVNCSERVER_HAVE_WS2TCPIP_H)
-check_include_file("arpa/inet.h"   HAVE_ARPA_INET_H)
-check_include_file("stdint.h"      HAVE_STDINT_H)
-check_include_file("stddef.h"      HAVE_STDDEF_H)
-check_include_file("sys/types.h"   HAVE_SYS_TYPES_H)
-check_include_file("sys/time.h"    LIBVNCSERVER_HAVE_SYS_TIME_H)
-check_include_file("sys/socket.h"  LIBVNCSERVER_HAVE_SYS_SOCKET_H)
-check_include_file("netinet/in.h"  LIBVNCSERVER_HAVE_NETINET_IN_H)
-
-if(HAVE_ARPA_INET_H)
-  list(APPEND CMAKE_EXTRA_INCLUDE_FILES "arpa/inet.h")
+set(HISH_ENABLE_DIAGNOSTICS OFF)
+if("$ENV{HISH_ENABLE_DIAGNOSTICS}" STREQUAL "1")
+    set(HISH_ENABLE_DIAGNOSTICS ON)
+    add_compile_definitions(HISH_ENABLE_DIAGNOSTICS=1)
 endif()
-
-check_function_exists(vfork           LIBVNCSERVER_HAVE_VFORK)
-
-# Crypto - use builtin only (simplest for HarmonyOS)
-set(CRYPTO_SOURCES ${COMMON_DIR}/crypto_included.c ${COMMON_DIR}/sha1.c ${COMMON_DIR}/d3des.c)
-
-# zlib - required for zlib/tight/zrle encodings
-find_package(ZLIB)
-if(ZLIB_FOUND)
-    message(STATUS "zlib found: ${ZLIB_LIBRARIES}")
-    set(LIBVNCSERVER_HAVE_LIBZ 1)
+add_library(hish_main SHARED napi_init.cpp native_terminal.cpp)
+if(HISH_ENABLE_DIAGNOSTICS)
+    target_sources(hish_main PRIVATE native_probe.cpp native_route_audit.cpp native_ptrace_audit.cpp)
+endif()
+if(DEFINED ENV{HISH_DOWNLOAD_ABI_DATA} AND NOT HISH_ENABLE_DIAGNOSTICS)
+    message(FATAL_ERROR "Download probes require HISH_ENABLE_DIAGNOSTICS=1")
+endif()
+if(HISH_ENABLE_DIAGNOSTICS AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64" AND DEFINED ENV{HISH_DOWNLOAD_ABI_DATA})
+    file(TO_CMAKE_PATH "$ENV{HISH_DOWNLOAD_ABI_DATA}" HISH_DOWNLOAD_ABI_DATA)
+    configure_file(download_probe_data.S.in "${CMAKE_CURRENT_BINARY_DIR}/download_probe_data.S" @ONLY)
+    target_sources(hish_main PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/download_probe_data.S")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/download_probe_data.S" PROPERTIES OBJECT_DEPENDS "${HISH_DOWNLOAD_ABI_DATA}")
+    target_compile_definitions(hish_main PRIVATE HISH_DOWNLOAD_ABI_TEST=1)
+endif()
+if(HISH_ENABLE_DIAGNOSTICS)
+add_library(hish_probe_payload SHARED probe_payload.cpp)
+add_executable(hish_probe_exec probe_executable.cpp)
+set_target_properties(hish_probe_exec PROPERTIES OUTPUT_NAME libhish_probe_exec SUFFIX .so)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    add_executable(hish_probe_bare probe_bare.S)
+    set_target_properties(hish_probe_bare PROPERTIES OUTPUT_NAME libhish_probe_bare SUFFIX .so LINKER_LANGUAGE C)
+    target_link_options(hish_probe_bare PRIVATE -nostdlib -static-pie -Wl,-e,_start -Wl,--export-dynamic -Wl,-z,max-page-size=4096)
+    add_executable(hish_probe_static probe_bare.S)
+    set_target_properties(hish_probe_static PROPERTIES OUTPUT_NAME libhish_probe_static SUFFIX .so LINKER_LANGUAGE C)
+    target_link_options(hish_probe_static PRIVATE -nostdlib -static -Wl,-e,_start -Wl,--export-dynamic -Wl,-z,max-page-size=4096)
+    add_executable(hish_probe_static_runtime probe_static_runtime.c)
+    set_target_properties(hish_probe_static_runtime PROPERTIES OUTPUT_NAME libhish_probe_static_runtime SUFFIX .so)
+    target_link_options(hish_probe_static_runtime PRIVATE -static -Wl,--image-base=0x60000000 -Wl,-z,max-page-size=4096)
+    add_executable(hish_probe_static_pie probe_static_runtime.c)
+    set_target_properties(hish_probe_static_pie PROPERTIES OUTPUT_NAME libhish_probe_static_pie SUFFIX .so)
+    target_link_options(hish_probe_static_pie PRIVATE -static-pie -Wl,-z,max-page-size=4096)
+    add_executable(hish_probe_dynamic_runtime probe_static_runtime.c)
+    set_target_properties(hish_probe_dynamic_runtime PROPERTIES OUTPUT_NAME libhish_probe_dynamic_runtime SUFFIX .so)
+    add_executable(hish_bench_ohos "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../bench/hishbench.c")
+    set_target_properties(hish_bench_ohos PROPERTIES OUTPUT_NAME libhish_bench_ohos SUFFIX .so)
+    target_compile_options(hish_bench_ohos PRIVATE -O2)
+endif()
+target_link_options(hish_probe_exec PRIVATE -Wl,--export-dynamic)
+endif()
+if(DEFINED ENV{HISH_LINUX_PAYLOAD_DIR})
+    file(TO_CMAKE_PATH "$ENV{HISH_LINUX_PAYLOAD_DIR}" HISH_LINUX_PAYLOAD_DIR)
 else()
-    message(WARNING "zlib not found — zlib/tight/zrle encodings will be unavailable")
+    set(HISH_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/linux-tools")
+    if(HISH_ENABLE_DIAGNOSTICS)
+        include("${HISH_RUNTIME_ROOT}/diagnostics-current.cmake" OPTIONAL)
+    else()
+        include("${HISH_RUNTIME_ROOT}/runtime-current.cmake" OPTIONAL)
+    endif()
 endif()
-
-check_type_size(pid_t     LIBVNCSERVER_PID_T)
-check_type_size(size_t    LIBVNCSERVER_SIZE_T)
-check_type_size(socklen_t LIBVNCSERVER_SOCKLEN_T)
-check_type_size(in_addr_t LIBVNCSERVER_IN_ADDR_T)
-
-# Generate rfbconfig.h
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/libvncserver/include/rfb/rfbconfig.h.cmakein
-               ${CMAKE_CURRENT_BINARY_DIR}/include/rfb/rfbconfig.h)
-
-# Configure libvncclient
-set(LIBVNCCLIENT_SOURCES
-    ${LIBVNCCLIENT_DIR}/cursor.c
-    ${LIBVNCCLIENT_DIR}/listen.c
-    ${LIBVNCCLIENT_DIR}/rfbclient.c
-    ${LIBVNCCLIENT_DIR}/sockets.c
-    ${LIBVNCCLIENT_DIR}/vncviewer.c
-    ${COMMON_DIR}/sockets.c
-    ${CRYPTO_SOURCES}
-)
-
-# Use TLS_none (no TLS support for simplicity)
-set(LIBVNCCLIENT_SOURCES
-    ${LIBVNCCLIENT_SOURCES}
-    ${LIBVNCCLIENT_DIR}/tls_none.c
-)
-
-# Use minilzo (no LZO dependency)
-set(LIBVNCCLIENT_SOURCES
-    ${LIBVNCCLIENT_SOURCES}
-    ${COMMON_DIR}/minilzo.c
-)
-
-# Include directories
-include_directories(
-    ${NATIVERENDER_ROOT_PATH}
-    ${NATIVERENDER_ROOT_PATH}/include
-    ${NATIVERENDER_ROOT_PATH}/libvncserver/include
-    ${NATIVERENDER_ROOT_PATH}/libvncserver/src/common
-    ${LIBVNCCLIENT_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/include
-)
-
-# HiSH sources
-add_library(hish_main SHARED
-    napi_init.cpp
-    napi_vnc.cpp
-    vnc_client.cpp
-    vnc_renderer.cpp
-    utils.cpp
-    ${LIBVNCCLIENT_SOURCES}
-)
-
-target_link_libraries(hish_main PUBLIC
-    libace_napi.z.so
-    libhilog_ndk.z.so
-    libEGL.so
-    libGLESv3.so
-    libnative_window.so
-    ${ZLIB_LIBRARIES}
-)
-
-# Add zlib include if found
-if(ZLIB_FOUND)
-    include_directories(${ZLIB_INCLUDE_DIRS})
-    target_compile_definitions(hish_main PRIVATE LIBVNCSERVER_HAVE_LIBZ)
+include(runtime_payloads.cmake)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64" AND EXISTS "${HISH_LINUX_PAYLOAD_DIR}")
+    # Daily payloads are an explicit delivery set, not every .so in a cache.
+    set(HISH_PACKAGE_POLICY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../scripts/daily-package-policy.json")
+    file(READ "${HISH_PACKAGE_POLICY}" HISH_PACKAGE_JSON)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HISH_PACKAGE_POLICY}")
+    string(JSON HISH_PACKAGE_COUNT LENGTH "${HISH_PACKAGE_JSON}" arm64Runtime)
+    math(EXPR HISH_PACKAGE_LAST "${HISH_PACKAGE_COUNT}-1")
+    set(HISH_DAILY_PAYLOAD_NAMES)
+    foreach(INDEX RANGE ${HISH_PACKAGE_LAST})
+        string(JSON NAME GET "${HISH_PACKAGE_JSON}" arm64Runtime ${INDEX})
+        list(APPEND HISH_DAILY_PAYLOAD_NAMES "${NAME}")
+        if(NOT HISH_ENABLE_DIAGNOSTICS AND NOT EXISTS "${HISH_LINUX_PAYLOAD_DIR}/${NAME}")
+            message(FATAL_ERROR "Missing daily payload: ${NAME}")
+        endif()
+    endforeach()
+    file(GLOB HISH_LINUX_PAYLOADS CONFIGURE_DEPENDS "${HISH_LINUX_PAYLOAD_DIR}/*.so")
+    foreach(PAYLOAD ${HISH_LINUX_PAYLOADS})
+        get_filename_component(PAYLOAD_NAME ${PAYLOAD} NAME)
+        if(NOT HISH_ENABLE_DIAGNOSTICS)
+            if(NOT PAYLOAD_NAME IN_LIST HISH_DAILY_PAYLOAD_NAMES)
+                message(FATAL_ERROR "Unexpected daily payload: ${PAYLOAD_NAME}; keep backup bytes outside the selected payload directory")
+            endif()
+        endif()
+        configure_file(${PAYLOAD} "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${PAYLOAD_NAME}" COPYONLY)
+    endforeach()
 endif()
+if(HISH_ENABLE_DIAGNOSTICS)
+    set(HISH_CA_CERTIFICATES "")
+    if(EXISTS "${HISH_LINUX_PAYLOAD_DIR}/ca-bundle.pem")
+        file(READ "${HISH_LINUX_PAYLOAD_DIR}/ca-bundle.pem" HISH_CA_CERTIFICATES)
+    endif()
+    configure_file(network_data.h.in "${CMAKE_CURRENT_BINARY_DIR}/network_data.h" @ONLY)
+endif()
+set(THIRD_PARTY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../third_party")
+set(MKSH "${THIRD_PARTY}/mksh")
+file(READ "${MKSH}/hish-source-manifest.json" MKSH_MANIFEST)
+string(JSON MKSH_SOURCE_COUNT LENGTH "${MKSH_MANIFEST}" files)
+math(EXPR MKSH_SOURCE_LAST "${MKSH_SOURCE_COUNT}-1")
+foreach(INDEX RANGE ${MKSH_SOURCE_LAST})
+    string(JSON NAME GET "${MKSH_MANIFEST}" files ${INDEX} name)
+    string(JSON EXPECTED GET "${MKSH_MANIFEST}" files ${INDEX} sha256)
+    file(SHA256 "${MKSH}/${NAME}" ACTUAL)
+    if(NOT ACTUAL STREQUAL EXPECTED)
+        message(FATAL_ERROR "Pinned mksh source changed: ${NAME}")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MKSH}/${NAME}")
+endforeach()
+set(TOYBOX "${THIRD_PARTY}/toybox")
+# The existing prerequisite config enables these POSIX utilities, but its
+# prerequisite-only command table omitted them. Generate a build-local overlay
+# without changing the downloaded Toybox tree or adding another shell.
+file(READ "${TOYBOX}/scripts/prereq/generated/newtoys.h" TOYBOX_TABLE)
+string(REPLACE "USE_ULIMIT(OLDTOY(prlimit" "USE_PRINTF(NEWTOY(printf, \"<1?^\", TOYFLAG_USR|TOYFLAG_BIN|TOYFLAG_MAYFORK))\nUSE_ULIMIT(OLDTOY(prlimit" TOYBOX_TABLE "${TOYBOX_TABLE}")
+string(REPLACE "USE_SORT(NEWTOY(sort" "USE_SLEEP(NEWTOY(sleep, \"<1\", TOYFLAG_BIN))\nUSE_SORT(NEWTOY(sort" TOYBOX_TABLE "${TOYBOX_TABLE}")
+string(REPLACE "USE_SH(OLDTOY(toysh" "USE_TEST(NEWTOY(test, 0, TOYFLAG_USR|TOYFLAG_BIN|TOYFLAG_NOHELP|TOYFLAG_MAYFORK))\nUSE_SH(OLDTOY(toysh" TOYBOX_TABLE "${TOYBOX_TABLE}")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/newtoys.h" "${TOYBOX_TABLE}")
+file(GLOB TOYBOX_SOURCES "${TOYBOX}/lib/*.c" "${TOYBOX}/toys/*/*.c")
+add_library(hish_shell SHARED shell_module.c mksh_adapter.c toybox_applets.c native_elf.cpp "${TOYBOX}/main.c" ${TOYBOX_SOURCES})
+include(mksh_platform.cmake)
+set(MKSH_FILES edit.c eval.c exec.c expr.c funcs.c histrap.c jobs.c lalloc.c lex.c main.c misc.c shf.c strlcpy.c syn.c tree.c var.c)
+list(TRANSFORM MKSH_FILES PREPEND "${MKSH}/")
+add_library(hish_mksh OBJECT ${MKSH_FILES})
+set_target_properties(hish_mksh PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(hish_mksh PRIVATE "${MKSH}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(hish_mksh PRIVATE ${MKSH_PLATFORM_FLAGS} -Os -fwrapv -funsigned-char -fvisibility=hidden -ffunction-sections -fdata-sections)
+target_compile_definitions(hish_mksh PRIVATE MKSH_OH_ADAPT main=HiSHMkshMain exit=HiSHChildExit
+    keywords=HiSHMkshKeywords tty_fd=HiSHMkshTtyFd
+    isatty=HiSHTtyIsatty tcgetattr=HiSHTtyGetAttr tcsetattr=HiSHTtySetAttr tcgetpgrp=HiSHTtyGetPgrp
+    tcsetpgrp=HiSHTtySetPgrp tcgetsid=HiSHTtyGetSid tcdrain=HiSHTtyDrain tcflush=HiSHTtyFlush
+    open=HiSHTtyOpen ioctl=HiSHTtyIoctl read=HiSHTtyRead readv=HiSHTtyReadv write=HiSHTtyWrite execve=HiSHMkshExecve)
+target_sources(hish_shell PRIVATE $<TARGET_OBJECTS:hish_mksh>)
+if(HISH_ENABLE_DIAGNOSTICS)
+    target_sources(hish_shell PRIVATE native_ptrace_loader.cpp native_seccomp_audit.cpp network_env.cpp compiler_env.cpp)
+endif()
+add_library(hish_ohos_tty OBJECT linux/terminal.c)
+set_target_properties(hish_ohos_tty PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(hish_ohos_tty PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(hish_ohos_tty PRIVATE
+    HISH_OHOS_TTY=1
+    isatty=HiSHTtyIsatty tcgetattr=HiSHTtyGetAttr tcsetattr=HiSHTtySetAttr
+    tcgetpgrp=HiSHTtyGetPgrp tcsetpgrp=HiSHTtySetPgrp tcgetsid=HiSHTtyGetSid
+    tcdrain=HiSHTtyDrain tcflush=HiSHTtyFlush open=HiSHTtyOpen ioctl=HiSHTtyIoctl
+    read=HiSHTtyRead readv=HiSHTtyReadv write=HiSHTtyWrite
+    readlink=HiSHTtyReadlink readlinkat=HiSHTtyReadlinkat)
+target_sources(hish_shell PRIVATE $<TARGET_OBJECTS:hish_ohos_tty>)
+if(HISH_ENABLE_DIAGNOSTICS AND EXISTS "${HISH_LINUX_PAYLOAD_DIR}/compiler-data.bin")
+    file(SHA256 "${HISH_LINUX_PAYLOAD_DIR}/compiler-data.bin" HISH_COMPILER_DATA_VERSION)
+    configure_file(compiler_data.S.in "${CMAKE_CURRENT_BINARY_DIR}/compiler_data.S" @ONLY)
+    target_sources(hish_shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/compiler_data.S")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/compiler_data.S" PROPERTIES OBJECT_DEPENDS "${HISH_LINUX_PAYLOAD_DIR}/compiler-data.bin")
+    target_compile_definitions(hish_shell PRIVATE HISH_COMPILER_DATA_VERSION="${HISH_COMPILER_DATA_VERSION}")
+endif()
+set_source_files_properties("${TOYBOX}/main.c" PROPERTIES COMPILE_DEFINITIONS "main=HiSHToyboxMain")
+target_include_directories(hish_shell PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" "${TOYBOX}" "${TOYBOX}/scripts/prereq")
+target_compile_options(hish_shell PRIVATE -Os -funsigned-char -ffunction-sections -fdata-sections -fno-strict-aliasing -include "${CMAKE_CURRENT_SOURCE_DIR}/shell_toybox_options.h")
+target_link_options(hish_shell PRIVATE -Wl,--gc-sections -Wl,-Bsymbolic)
+target_link_libraries(hish_shell PRIVATE libz.so)
+target_compile_definitions(hish_shell PRIVATE _GNU_SOURCE TOYBOX_VERSION="HiSH-native" exit=HiSHChildExit pipe=HiSHPipe)
+target_compile_options(hish_main PRIVATE -Wall -Wextra -Werror=return-type)
+target_link_libraries(hish_main PUBLIC hish_shell libace_napi.z.so)
+if(HISH_ENABLE_DIAGNOSTICS)
+    target_link_libraries(hish_main PRIVATE libchild_process.so libhilog_ndk.z.so)
+endif()
+add_library(hish_exec_bridge SHARED exec_bridge.cpp)
+target_link_libraries(hish_exec_bridge PRIVATE hish_shell)
+include(configure_inputs.cmake)

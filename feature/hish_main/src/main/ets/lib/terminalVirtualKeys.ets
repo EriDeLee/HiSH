@@ -10,12 +10,12 @@ export interface VirtualKeyMetrics {
 export function getVirtualKeyMetrics(deviceType: string): VirtualKeyMetrics {
   const isPhone = deviceType === 'phone'
   return {
-    margin: isPhone ? 1 : 2,
-    padding: isPhone ? 2 : 4,
-    height: 28,
-    width: isPhone ? 42 : 60,
-    fontSize: isPhone ? 10 : 14,
-    radius: 5
+    margin: 0,
+    padding: 0,
+    height: 32,
+    width: isPhone ? 28 : 36,
+    fontSize: isPhone ? 15 : 18,
+    radius: 0
   }
 }
 
@@ -88,11 +88,14 @@ export const NormalKeySequences: NormalKeySequencesMap = {
 export interface InputModifierResult {
   data: string
   shouldResetCtrl: boolean
+  shouldResetShift: boolean
+  shouldResetAlt: boolean
   ctrlConverted: boolean
   shiftConverted: boolean
 }
 
-export function applyVirtualKeyModifiers(data: string, ctrlPressed: boolean, shiftPressed: boolean): InputModifierResult {
+export function applyVirtualKeyModifiers(data: string, ctrlPressed: boolean, shiftPressed: boolean,
+  altPressed: boolean = false): InputModifierResult {
   let output = data
   let ctrlConverted = false
   let shiftConverted = false
@@ -101,7 +104,16 @@ export function applyVirtualKeyModifiers(data: string, ctrlPressed: boolean, shi
   if (ctrlPressed && output.length === 1) {
     const char = output.charAt(0)
     if (char >= 'a' && char <= 'z') {
-      output = String.fromCharCode(char.charCodeAt(0) - 'a'.charCodeAt(0) + 1)
+      output = String.fromCharCode(char.charCodeAt(0) - 96)
+      ctrlConverted = true
+    } else if (char >= '@' && char <= '_') {
+      output = String.fromCharCode(char.charCodeAt(0) - 64)
+      ctrlConverted = true
+    } else if (char === ' ') {
+      output = '\x00'
+      ctrlConverted = true
+    } else if (char === '?') {
+      output = '\x7f'
       ctrlConverted = true
     }
     shouldResetCtrl = true
@@ -116,8 +128,10 @@ export function applyVirtualKeyModifiers(data: string, ctrlPressed: boolean, shi
   }
 
   return {
-    data: output,
+    data: altPressed && output.length > 0 ? '\x1b' + output : output,
     shouldResetCtrl: shouldResetCtrl,
+    shouldResetShift: shiftPressed && output.length > 0,
+    shouldResetAlt: altPressed && output.length > 0,
     ctrlConverted: ctrlConverted,
     shiftConverted: shiftConverted
   }

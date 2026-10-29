@@ -1,0 +1,2 @@
+#pragma once
+static const char HiSHCACertificates[] = R"HISH_CA(@HISH_CA_CERTIFICATES@)HISH_CA";

@@ -1,0 +1,19 @@
+[
+  {"kind":"musl","file":"curl-8.22.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/curl-8.22.0-r0.apk","sha256":"27674b4f5a4a9b51db6673bf7e75e247b51c711294a4fff638fe9a67ae21ed48"},
+  {"kind":"musl","file":"libcurl-8.22.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libcurl-8.22.0-r0.apk","sha256":"ef6b8fa24dcfeac950582c3f5702212c56cc40db5d09286d7dc3bdca1490151a"},
+  {"kind":"musl","file":"ca-certificates-bundle-20260909-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/ca-certificates-bundle-20260909-r0.apk","sha256":"ad418de0031d2de47650002084ab494e0c8f28c386e8744173311b410e56fcf5"},
+  {"kind":"musl","file":"brotli-libs-1.2.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/brotli-libs-1.2.0-r0.apk","sha256":"c8a9113b0007d40291e55cfc196744b64004253707e37b3c07e188166fb2d0a0"},
+  {"kind":"musl","file":"c-ares-1.34.8-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/c-ares-1.34.8-r0.apk","sha256":"7468b8355eb7a54c2829ed3e72b61f49b2968c1dd0281e16ddf939fcf1c9e91b"},
+  {"kind":"musl","file":"libcrypto3-3.5.9-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libcrypto3-3.5.9-r0.apk","sha256":"3b0bd7aaac36d49216f47d025f303dafb6da8d05bd258f71900d3b6156d36012"},
+  {"kind":"musl","file":"libidn2-2.3.8-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libidn2-2.3.8-r0.apk","sha256":"71db3591a2cb251aae463b966f9731c9ecae3bff4dccea552e0033002b92fd75"},
+  {"kind":"musl","file":"libunistring-1.4.1-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libunistring-1.4.1-r0.apk","sha256":"03f26b1c897ad74af51b475d5f6cebad50efe90e4d42a0c38ffcb37859077481"},
+  {"kind":"musl","file":"nghttp2-libs-1.69.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/nghttp2-libs-1.69.0-r0.apk","sha256":"2e17aa1d7d4a37b2d029210d239b8b2e4ac40748d9a8c8912a6b607011034fd1"},
+  {"kind":"musl","file":"libpsl-0.21.5-r3.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libpsl-0.21.5-r3.apk","sha256":"3078398181f0955da453826965a9e184494e4d9dfd22391e28d72f7561a0ca2b"},
+  {"kind":"musl","file":"libssl3-3.5.9-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libssl3-3.5.9-r0.apk","sha256":"cdb3762116994f767cd1da423fa8004bd36b2e3802e3a1343786a40f00a5030e"},
+  {"kind":"musl","file":"zlib-1.3.2-r1.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/zlib-1.3.2-r1.apk","sha256":"82d52fa82a46c73aae8b9f95d7f31a196137f3ce4a000980cdbbfc05c245e7bf"},
+  {"kind":"musl","file":"zstd-libs-1.5.7-r2.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/zstd-libs-1.5.7-r2.apk","sha256":"50a998e56e4bf31504996e49c1b4a23eed5e0cd4e24b8a1356a54daf1a6eabbe"},
+  {"kind":"musl","file":"git-2.52.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/git-2.52.0-r0.apk","sha256":"7c9d69ea4db366c8337789ca8b334bde338b9b064ae25baebad6872781e906fc"},
+  {"kind":"musl","file":"libexpat-2.9.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/libexpat-2.9.0-r0.apk","sha256":"a9d67ab6d0cd53c7695cfadb7dfbc8c805d341246284b6562432fc08e380547a"},
+  {"kind":"musl","file":"pcre2-10.49-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/pcre2-10.49-r0.apk","sha256":"a0af38fe98cb22c358aca1e1e504141c6673efef7635c539a914b83fb5c13b58"},
+  {"kind":"musl","file":"git-init-template-2.52.0-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/git-init-template-2.52.0-r0.apk","sha256":"186a00427cc7ea94ad05b0831320d2a77f757743033392998a28b7247e410e63"}
+]

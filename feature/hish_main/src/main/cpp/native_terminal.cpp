@@ -1,0 +1,443 @@
+#include "native_terminal.h"
+#include "native_elf.h"
+#include "hish_tty_shared.h"
+#include "supervisor_reap.h"
+#include <AbilityKit/native_child_process.h>
+#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <dirent.h>
+#include <fstream>
+#include <sstream>
+#include <map>
+#include <mutex>
+#include <pty.h>
+#include <signal.h>
+#include <stdexcept>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <poll.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#include <unistd.h>
+#include <thread>
+#include <chrono>
+
+extern "C" int HiSHShellMain(int argc, char** argv);
+extern "C" void HiSHNativeMain(NativeChildProcess_Args args);
+
+namespace {
+struct Session { int fd; pid_t pid; bool pty; bool eof = false; HishTtyState* tty = nullptr; };
+std::mutex sessionsMutex;
+std::map<int, Session> sessions;
+int nextId = 1;
+volatile sig_atomic_t stopSupervisor = 0;
+void RequestStop(int) { stopSupervisor = 1; }
+std::vector<pid_t> OwnedChildren()
+{
+    std::vector<pid_t> children;
+    const std::string self = std::to_string(getpid());
+    std::ifstream list("/proc/self/task/" + self + "/children"); pid_t child;
+    if (list.is_open()) { while (list >> child) if (child > 1) children.push_back(child); return children; }
+    DIR* processes = opendir("/proc"); if (!processes) return children;
+    while (auto* item = readdir(processes)) {
+        char* end = nullptr; const long pid = strtol(item->d_name, &end, 10);
+        if (!end || *end || pid <= 1 || pid > INT32_MAX) continue;
+        std::ifstream stat("/proc/" + std::to_string(pid) + "/stat"); std::string line; std::getline(stat, line);
+        const auto closing = line.find_last_of(')'); if (closing == std::string::npos) continue;
+        std::istringstream fields(line.substr(closing + 1)); char state; pid_t parent;
+        if ((fields >> state >> parent) && parent == getpid()) children.push_back(pid);
+    }
+    closedir(processes); return children;
+}
+[[noreturn]] void ParentExited(int)
+{
+    // The supervisor is a subreaper. Kill/reap only its own children; adopted
+    // descendants remain covered even if they changed process group/session.
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto children = OwnedChildren();
+        for (const auto child : children) kill(child, SIGKILL);
+        while (waitpid(-1, nullptr, WNOHANG) > 0) {}
+        if (children.empty()) _exit(0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    _exit(0);
+}
+[[noreturn]] void Supervise(int fd, pid_t shell)
+{
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    pollfd peer {fd, 0, 0};
+    for (;;) {
+        if (stopSupervisor) ParentExited(0);
+        const bool shellExited = HishReapExitedChildren(shell, [shell]() {
+            pid_t result;
+            do { result = waitpid(-1, nullptr, WNOHANG); } while (result < 0 && errno == EINTR);
+            // Preserve the old shutdown-on-wait-error behavior. No WUNTRACED:
+            // adopted stopped jobs must not be mistaken for exited processes.
+            return result < 0 ? shell : result;
+        });
+        if (shellExited) { ParentExited(0); }
+        const int ready = poll(&peer, 1, 250);
+        if (ready < 0 && errno == EINTR) { continue; }
+        if (ready < 0 || (peer.revents & (POLLHUP | POLLERR | POLLNVAL))) { ParentExited(0); }
+    }
+}
+
+[[noreturn]] void Fail(const std::string& stage, int code = errno)
+{
+    throw std::runtime_error(stage + ": errno=" + std::to_string(code) + " (" + strerror(code) + ")");
+}
+void MakeDirectory(const std::string& path)
+{
+    if (mkdir(path.c_str(), 0700) != 0 && errno != EEXIST) { Fail("mkdir " + path); }
+    struct stat info {};
+    if (stat(path.c_str(), &info) != 0 || !S_ISDIR(info.st_mode)) { Fail("directory " + path, ENOTDIR); }
+}
+int BoundedSize(int value) { return std::clamp(value, 1, 4096); }
+Session& Get(int id)
+{
+    auto found = sessions.find(id);
+    if (found == sessions.end()) { Fail("session", EBADF); }
+    return found->second;
+}
+}
+
+namespace hish {
+SessionInfo Start(const std::string& root, int columns, int rows, const std::string& mode)
+{
+    if (root.empty() || root.front() != '/' || root.find('\n') != std::string::npos ||
+        (mode != "shell"
+#ifdef HISH_ENABLE_DIAGNOSTICS
+         && mode != "probe"
+#endif
+        )) { Fail("start arguments", EINVAL); }
+    for (const char* suffix : {"", "/home", "/usr", "/usr/bin", "/usr/lib", "/usr/lib/musl", "/tmp"}) {
+        MakeDirectory(root + suffix);
+    }
+    int master = -1, child = -1;
+    winsize size {};
+    size.ws_col = BoundedSize(columns);
+    size.ws_row = BoundedSize(rows);
+    const int ptyResult = mode == "shell" ? openpty(&master, &child, nullptr, nullptr, &size) : -1;
+    const int ptyError = mode == "shell" && ptyResult != 0 ? errno : 0;
+    const bool pty = ptyResult == 0;
+    if (!pty) {
+        int pair[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0) { Fail("socketpair"); }
+        master = pair[0];
+        child = pair[1];
+    }
+    int ttyFd = -1; HishTtyState* tty = nullptr;
+    if (!pty) {
+        ttyFd = memfd_create("hish-terminal-state", 0);
+        if (ttyFd >= 0 && ftruncate(ttyFd, 4096) == 0) {
+            void* memory = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, ttyFd, 0);
+            if (memory != MAP_FAILED) {
+                tty = static_cast<HishTtyState*>(memory); memset(tty, 0, sizeof(*tty));
+                tty->magic = HISH_TTY_MAGIC; tty->version = HISH_TTY_VERSION;
+                tty->columns = size.ws_col; tty->rows = size.ws_row;
+                tty->iflag = ICRNL | IXON; tty->oflag = OPOST | ONLCR; tty->cflag = CS8 | CREAD;
+                tty->lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN;
+                tty->cc[VINTR] = 3; tty->cc[VQUIT] = 28; tty->cc[VERASE] = 127; tty->cc[VKILL] = 21;
+                tty->cc[VEOF] = 4; tty->cc[VMIN] = 1; tty->cc[VSTART] = 17; tty->cc[VSTOP] = 19; tty->cc[VSUSP] = 26;
+                tty->cc[VWERASE] = 23;
+                tty->input_speed = B38400; tty->output_speed = B38400;
+                struct stat identity {};
+                if (fstat(child, &identity) == 0) { tty->device = identity.st_dev; tty->inode = identity.st_ino; }
+            }
+        }
+        if (!tty && ttyFd >= 0) { close(ttyFd); ttyFd = -1; }
+    }
+    if (fcntl(master, F_SETFL, O_NONBLOCK) < 0 || fcntl(master, F_SETFD, FD_CLOEXEC) < 0) {
+        const int code = errno; close(master); close(child); if (ttyFd >= 0) close(ttyFd); if (tty) munmap(tty, 4096); Fail("fcntl", code);
+    }
+    std::string params = mode + "\n" + root + "\n" + std::to_string(getpid());
+    NativeChildProcess_Fd terminal {const_cast<char*>("terminal"), child, nullptr};
+    NativeChildProcess_Args args {params.data(), {&terminal}};
+    // Phone firmware denies the framework's child-process launcher, but direct
+    // application-owned fork has been measured to work. The preloaded C shell
+    // module executes in the child; no exec, CPU translation or HDC is involved.
+    fflush(nullptr);
+    const pid_t pid = fork();
+    const int forkError = errno;
+    if (pid == 0) {
+        close(master);
+        if (tty) {
+            const auto value = std::to_string(ttyFd); setenv("HISH_TTY_STATE_FD", value.c_str(), 1);
+            const int terminalFd = fcntl(child, F_DUPFD, 256);
+            if (terminalFd >= 0) setenv("HISH_TTY_IO_FD", std::to_string(terminalFd).c_str(), 1);
+        }
+        HiSHNativeMain(args);
+        _exit(0);
+    }
+    close(child);
+    if (ttyFd >= 0) close(ttyFd);
+    if (pid < 0) {
+        close(master);
+        if (tty) munmap(tty, 4096);
+        Fail("fork native shell", forkError);
+    }
+    std::lock_guard<std::mutex> lock(sessionsMutex);
+    const int id = nextId++;
+    sessions.emplace(id, Session{master, pid, pty, false, tty});
+    return {id, pid, pty, ptyError};
+}
+
+Output Read(int id)
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex);
+    Session& session = Get(id);
+    Output output {}; output.running = !session.eof;
+    uint8_t data[8192];
+    while (!session.eof && output.bytes.size() < 65536) {
+        const ssize_t count = read(session.fd, data, sizeof(data));
+        if (count > 0) { output.bytes.insert(output.bytes.end(), data, data + count); }
+        else if (count == 0 || (count < 0 && errno == EIO)) { session.eof = true; }
+        else if (errno == EINTR) { continue; }
+        else if (errno == EAGAIN || errno == EWOULDBLOCK) { break; }
+        else { Fail("read"); }
+    }
+    output.running = !session.eof;
+    output.convertEol = !session.pty;
+    if (session.tty) {
+        const auto flags = __atomic_load_n(&session.tty->lflag, __ATOMIC_ACQUIRE);
+        output.rawInput = !(flags & ICANON); output.echoInput = flags & ECHO;
+        output.localFlags = flags;
+        output.controlChars.assign(session.tty->cc, session.tty->cc + 32);
+        output.convertEol = (session.tty->oflag & (OPOST | ONLCR)) == (OPOST | ONLCR);
+    }
+    return output;
+}
+
+size_t Write(int id, const uint8_t* bytes, size_t size)
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex);
+    Session& session = Get(id);
+    const uint32_t flags = session.tty ? __atomic_load_n(&session.tty->lflag, __ATOMIC_ACQUIRE) : ISIG | ICANON;
+    // A socket has no terminal input discipline. Convert Enter without interpreting commands.
+    std::vector<uint8_t> input(bytes, bytes + size);
+    if (!session.pty && (!session.tty || (session.tty->iflag & ICRNL))) { std::replace(input.begin(), input.end(), uint8_t('\r'), uint8_t('\n')); }
+    const auto signalFor = [&](uint8_t value) {
+        if (session.pty || !(flags & ISIG)) return 0;
+        const auto matches = [&](int index, uint8_t fallback) {
+            const auto character = session.tty ? session.tty->cc[index] : fallback;
+            return character != 0 && value == character;
+        };
+        if (matches(VINTR, 3)) return SIGINT;
+        if (matches(VQUIT, 28)) return SIGQUIT;
+        if (matches(VSUSP, 26)) return SIGTSTP;
+        return 0;
+    };
+    size_t consumed = 0;
+    const auto eofFor = [&](uint8_t value) {
+        return !session.pty && session.tty && (flags & ICANON) && session.tty->cc[VEOF] && value == session.tty->cc[VEOF];
+    };
+    const auto lockInput = [&]() {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            if (HishTryInputLock(session.tty)) return true;
+            std::this_thread::yield();
+        }
+        return false;
+    };
+    while (consumed < size) {
+        const int signal = signalFor(bytes[consumed]);
+        if (signal) {
+            const pid_t foreground = session.tty ? __atomic_load_n(&session.tty->foreground, __ATOMIC_ACQUIRE) : session.pid;
+            if (syscall(SYS_kill, foreground > 1 ? -foreground : session.pid, signal) && errno != ESRCH) Fail("terminal signal");
+            consumed++;
+            continue;
+        }
+        if (eofFor(bytes[consumed])) {
+            if (!lockInput()) return consumed;
+            const auto tail = session.tty->eof_tail;
+            const bool full = tail - session.tty->eof_head == 16;
+            if (!full) { session.tty->eof_at[tail % 16] = session.tty->input_written; session.tty->eof_tail = tail + 1; }
+            HishUnlockInput(session.tty);
+            if (full) return consumed;
+            consumed++; continue;
+        }
+        size_t end = consumed + 1;
+        while (end < size && !signalFor(bytes[end]) && !eofFor(bytes[end])) end++;
+        if (session.tty) {
+            if (!lockInput()) return consumed;
+        }
+        ssize_t count;
+        do {
+            count = session.pty ? write(session.fd, input.data() + consumed, end - consumed) :
+                send(session.fd, input.data() + consumed, end - consumed, MSG_NOSIGNAL);
+        } while (count < 0 && errno == EINTR);
+        const int saved = errno;
+        if (session.tty) {
+            if (count > 0) session.tty->input_written += count;
+            HishUnlockInput(session.tty);
+        }
+        errno = saved;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return consumed;
+        if (count < 0) Fail("write");
+        consumed += static_cast<size_t>(count);
+        if (consumed < end) return consumed;
+    }
+    return consumed;
+}
+
+void Resize(int id, int columns, int rows)
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex);
+    Session& session = Get(id);
+    if (!session.pty) {
+        if (session.tty) {
+            session.tty->columns = BoundedSize(columns); session.tty->rows = BoundedSize(rows);
+            const auto group = __atomic_load_n(&session.tty->foreground, __ATOMIC_ACQUIRE);
+            if (group > 1) kill(-group, SIGWINCH);
+        }
+        return;
+    }
+    winsize size {};
+    size.ws_col = BoundedSize(columns); size.ws_row = BoundedSize(rows);
+    if (ioctl(session.fd, TIOCSWINSZ, &size) != 0) { Fail("TIOCSWINSZ"); }
+}
+
+void Close(int id)
+{
+    Session session {};
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex);
+        auto found = sessions.find(id);
+        if (found == sessions.end()) { return; }
+        session = found->second;
+        sessions.erase(found);
+    }
+    close(session.fd);
+    if (session.tty) munmap(session.tty, 4096);
+    // The unreaped owned child reserves this process/group id until reaping.
+    // Commands inherit this private group because pipe mode has no job control.
+    kill(session.pid, SIGTERM);
+    int status = 0;
+    pid_t reaped;
+    do { reaped = waitpid(session.pid, &status, WNOHANG); } while (reaped < 0 && errno == EINTR);
+    if (reaped == 0) {
+        std::thread([pid = session.pid]() {
+            int status = 0;
+            for (int attempt = 0; attempt < 200; ++attempt) {
+                const auto result = waitpid(pid, &status, WNOHANG);
+                if (result == pid || (result < 0 && errno != EINTR)) return;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            kill(-pid, SIGKILL); kill(pid, SIGKILL);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+        }).detach();
+    }
+}
+}
+
+extern "C" __attribute__((visibility("default"))) void HiSHNativeMain(NativeChildProcess_Args args)
+{
+    int fd = -1;
+    for (auto* item = args.fdList.head; item != nullptr; item = item->next) {
+        if (strcmp(item->fdName, "terminal") == 0) { fd = item->fd; break; }
+    }
+    if (fd < 0 || args.entryParams == nullptr) { return; }
+    const std::string params(args.entryParams);
+    const auto separator = params.find('\n');
+    if (separator == std::string::npos) { return; }
+    const auto parentSeparator = params.find('\n', separator + 1);
+    if (parentSeparator == std::string::npos) { return; }
+    const std::string mode = params.substr(0, separator), root = params.substr(separator + 1, parentSeparator - separator - 1);
+    const pid_t parent = static_cast<pid_t>(strtol(params.c_str() + parentSeparator + 1, nullptr, 10));
+    if (parent <= 1 || getppid() != parent) { return; }
+    if (dup2(fd, STDIN_FILENO) < 0 || dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) { return; }
+    if (fd > STDERR_FILENO) { close(fd); }
+    // Do not recycle service descriptor numbers here: inherited runtime
+    // pthread_atfork callbacks may still refer to them on a later shell fork.
+    // They are never used for IPC by the shell; process exit releases them.
+    sigset_t empty; sigemptyset(&empty); sigprocmask(SIG_SETMASK, &empty, nullptr);
+    for (int signal : {SIGCHLD, SIGINT, SIGQUIT, SIGTERM, SIGHUP, SIGPIPE, SIGWINCH}) { ::signal(signal, SIG_DFL); }
+    if (setsid() < 0) { dprintf(2, "[setsid] errno=%d\r\n", errno); return; }
+    signal(SIGTERM, RequestStop);
+    const int subreaper = prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    if (subreaper != 0) dprintf(2, "[lifecycle] subreaper unavailable errno=%d\r\n", errno);
+    const char* ttyStateFd = getenv("HISH_TTY_STATE_FD");
+    if (ttyStateFd) {
+        void* memory = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, atoi(ttyStateFd), 0);
+        if (memory != MAP_FAILED) { auto* state = static_cast<HishTtyState*>(memory); state->foreground = getpgrp(); state->session = getsid(0); munmap(memory, 4096); }
+    }
+    // PDEATHSIG tracks the creating NAPI worker thread, not the UI lifetime.
+    // A supervisor watches the transport and survives a shell's exec builtin.
+    const int watch = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, 3);
+    if (watch < 0) { dprintf(2, "[peer-watch] dup errno=%d\r\n", errno); return; }
+    if (getppid() != parent) { ParentExited(SIGTERM); }
+    const pid_t shell = fork();
+    if (shell < 0) { close(watch); dprintf(2, "[shell-fork] errno=%d\r\n", errno); return; }
+    if (shell > 0) { Supervise(watch, shell); }
+    close(watch);
+    signal(SIGTERM, SIG_DFL);
+    if (isatty(STDIN_FILENO)) { ioctl(STDIN_FILENO, TIOCSCTTY, 0); }
+    setenv("HOME", (root + "/home").c_str(), 1);
+    setenv("PWD", (root + "/home").c_str(), 1);
+    setenv("PREFIX", (root + "/usr").c_str(), 1);
+    setenv("TMPDIR", (root + "/tmp").c_str(), 1);
+    HiSHPrepareToolWrappers();
+    setenv("TERM", "xterm-256color", 1);
+    const char* inheritedPath = getenv("PATH");
+    const std::string path = root + "/usr/bin:" + (inheritedPath ? inheritedPath : "/system/bin:/bin");
+    setenv("PATH", path.c_str(), 1);
+    setenv("PS1", "$ ", 1);
+    if (chdir((root + "/home").c_str()) != 0) {
+        dprintf(STDOUT_FILENO, "[home] chdir errno=%d (%s)\r\n", errno, strerror(errno)); return;
+    }
+#ifdef HISH_ENABLE_DIAGNOSTICS
+    if (mode == "probe") {
+        utsname machine {};
+        uname(&machine);
+        dprintf(STDOUT_FILENO, "\r\nHiSH native · OHOS libc · %s\r\n[process] pid=%d uid=%d\r\nHOME=%s\r\n",
+            machine.machine, getpid(), getuid(), getenv("HOME"));
+        dprintf(STDOUT_FILENO, "[home] native read/write begin\r\n");
+        const std::string file = root + "/home/.native-probe-" + std::to_string(getpid());
+        int test = open(file.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+        if (test >= 0) {
+            char value = 'x', result = 0;
+            const bool written = write(test, &value, 1) == 1;
+            const bool seeked = lseek(test, 0, SEEK_SET) == 0;
+            const bool readBack = read(test, &result, 1) == 1 && result == value;
+            close(test); unlink(file.c_str());
+            dprintf(STDOUT_FILENO, "[home] %s\r\n", written && seeked && readBack ? "PASS" : "FAIL");
+        } else { dprintf(STDOUT_FILENO, "[home] errno=%d (%s)\r\n", errno, strerror(errno)); }
+        int master = -1, slave = -1;
+        const int pty = openpty(&master, &slave, nullptr, nullptr, nullptr);
+        const int code = errno;
+        if (pty == 0) { close(master); close(slave); dprintf(STDOUT_FILENO, "[pty] PASS\r\n"); }
+        else { dprintf(STDOUT_FILENO, "[pty] openpty errno=%d (%s)\r\n", code, strerror(code)); }
+        dprintf(STDOUT_FILENO, "[fork] begin (isolated test process)\r\n");
+        const pid_t child = fork();
+        if (child == 0) { _exit(0); }
+        if (child > 0) {
+            int status = 0;
+            pid_t waited;
+            do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+            dprintf(STDOUT_FILENO, "[fork] %s\r\n",
+                waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? "PASS" : "FAIL");
+        } else { dprintf(STDOUT_FILENO, "[fork] errno=%d (%s)\r\n", errno, strerror(errno)); }
+        dprintf(STDOUT_FILENO, "[exec] /system/bin/sh begin\r\n");
+        execl("/system/bin/sh", "sh", "-c", "printf 'NATIVE_EXEC_OK\\n'; id; uname -m; pwd", nullptr);
+    } else
+#endif
+    {
+        dprintf(STDOUT_FILENO, "\r\nHiSH · 原生终端\r\n输入 hish-tools 查看可用工具。\r\n\r\n");
+        char name[] = "sh";
+        char* arguments[] = {name, nullptr};
+        _exit(HiSHShellMain(1, arguments));
+    }
+#ifdef HISH_ENABLE_DIAGNOSTICS
+    const int code = errno;
+    dprintf(STDOUT_FILENO, "[exec] errno=%d (%s)\r\nNative execution is not available; no emulation fallback.\r\n",
+        code, strerror(code));
+#endif
+}

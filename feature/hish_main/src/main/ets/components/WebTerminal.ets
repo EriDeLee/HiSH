@@ -1,15 +1,13 @@
 import util from '@ohos.util';
-import { buffer } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import napi from 'libhish_main.so';
+import { NativeTerminalSession } from '../native/NativeTerminalSession';
 import { webview } from '@kit.ArkWeb';
-import { pasteboard, deviceInfo } from '@kit.BasicServicesKit'
+import { deviceInfo } from '@kit.BasicServicesKit'
 import appOption, { CursorShape, savePreference, UserFont, UserFontData } from '../model/appOption';
 import { common } from '@kit.AbilityKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
-import stringToArrayBuffer from '../lib/stringToArrayBuffer';
 import fileToDataUrl from '../lib/fileToDataUrl';
-import { ImmersiveButtonModifier, ImmersiveToggleModifier } from '../lib/immersiveButton';
+import { ImmersiveButtonModifier } from '../lib/immersiveButton';
 import {
   applyVirtualKeyModifiers,
   FunctionKeySequences,
@@ -26,19 +24,26 @@ const VKeyHeight = VKeyMetrics.height;
 const VKeyWidth = VKeyMetrics.width;
 const VKeyFontSize = VKeyMetrics.fontSize;
 const VKeyRadius = VKeyMetrics.radius;
+const VKeyActiveTextColor = '#80DEEA';
+const VKeyLabelStyle: LabelStyle = {
+  maxLines: 1,
+  minFontSize: VKeyFontSize - 1,
+  maxFontSize: VKeyFontSize,
+  heightAdaptivePolicy: TextHeightAdaptivePolicy.MIN_FONT_SIZE_FIRST
+};
 
 @Component
 export default struct WebTerminal {
   @Require virtKeyEnabled: boolean = true
   @State ctrlPressed: boolean = false
   @State shiftPressed: boolean = false
+  @State altPressed: boolean = false
   @State fnPressed: boolean = false
   @Watch('onFontSizeChanged') @StorageProp(appOption.terminalFontSize) fontSize: number | null = null
   @Watch('onFontFamilyChanged') @StorageProp(appOption.terminalFontFamily) fontFamily: string = 'Default'
   @Watch('onCursorShapeChanged') @StorageProp(appOption.terminalCursorShape) cursorShape: CursorShape | null = null
   @Watch('onCursorBlinkChanged') @StorageProp(appOption.terminalCursorBlink) cursorBlink: boolean | null = null
   @Watch('saveShowVirtKey') @StorageProp(appOption.showVirtKey) showVirtKey: boolean = true
-  @StorageProp(appOption.vncEnabled) vncEnabled: boolean = false
   @Watch('onLigaturesChanged') @StorageProp(appOption.terminalLigatures) termLigatures: boolean = false
   @Watch('onItalicChanged') @StorageProp(appOption.terminalItalic) termItalic: boolean = true
   @Watch('onBgColorChanged') @StorageProp(appOption.terminalBackgroundColor) termBgColor: string = '#000000'
@@ -46,67 +51,27 @@ export default struct WebTerminal {
   @Watch('onBgBlurChanged') @StorageProp(appOption.terminalBackgroundBlur) termBgBlur: number = 0
   @Watch('onUserFontsChanged') @StorageProp(appOption.terminalUserFonts) termUserFonts: UserFont[] = []
   webviewController: WebviewController = new webview.WebviewController()
-  utf8Decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true })
-  resizeTimeout?: number = undefined
   applicationMode: boolean = false
   immersiveButton: ImmersiveButtonModifier = new ImmersiveButtonModifier()
-  immersiveToggle: ImmersiveToggleModifier = new ImmersiveToggleModifier()
-
-  @Builder
-  contextMenu(webController: WebviewController) {
-    Flex({
-      direction: FlexDirection.Column
-    }) {
-      MenuItem({ content: $r('app.string.copy_text') })
-        .width('100%')
-        .onClick(async () => {
-          const selection = await webController.runJavaScript('exports.copy()')
-          if (selection !== '""') {
-            let text: string = JSON.parse(selection);
-            const board = pasteboard.getSystemPasteboard()
-            const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text)
-            board.setData(pasteData)
-          }
-        })
-      PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
-        .onClick(async (event: ClickEvent, result: PasteButtonOnClickResult) => {
-          if (PasteButtonOnClickResult.SUCCESS === result) {
-            let board = pasteboard.getSystemPasteboard();
-            const data = await board.getData()
-            const text = data.getPrimaryText()
-            const array = util.TextEncoder.create().encodeInto(text)
-            const base64 = new util.Base64Helper().encodeToStringSync(array)
-            webController.runJavaScript(`exports.paste(atob('${base64}'))`)
-          }
-        })
-        .fontColor(Color.White)
-        .backgroundColor('#1A292B2E')
-        .align(Alignment.Start)
-        .padding({ left: 12, right: 12 })
-        .width('100%')
-      MenuItem({ content: $r('app.string.menu_clear_screen') })
-        .width('100%')
-        .onClick(() => {
-          webController.runJavaScript('exports.clearScreen()')
-        })
-    }
-    .width('160vp')
-  }
 
   /**
    * @param appCode code used in application mode
    */
   @Builder
-  buildVKey(name: string, value: string, appCode?: string) {
+  buildVKey(name: string, value: string, appCode?: string, weight: number = 1) {
     Button(name, { buttonStyle: ButtonStyleMode.TEXTUAL })
       .height(VKeyHeight)
-      .width(VKeyWidth)
+      .layoutWeight(weight)
       .borderRadius(VKeyRadius)
       .fontSize(VKeyFontSize)
+      .labelStyle(VKeyLabelStyle)
+      .fontWeight(FontWeight.Normal)
       .fontColor($r('sys.color.white'))
+      .backgroundColor(Color.Black)
       .margin(VKeyMargin)
       .padding({ left: VKeyPadding, right: VKeyPadding })
       .attributeModifier(this.immersiveButton)
+      .accessibilityText(name)
       .onClick(() => {
         if (this.applicationMode && appCode) {
           this.sendInput(appCode);
@@ -118,102 +83,137 @@ export default struct WebTerminal {
 
   @Builder
   toggleCtrlKey(name: string, action: () => void) {
-    Toggle({ type: ToggleType.Button, isOn: this.ctrlPressed }) {
-      Text(name).fontSize(VKeyFontSize).fontWeight(FontWeight.Medium)
-    }
+    Button(name, { buttonStyle: ButtonStyleMode.TEXTUAL })
     .height(VKeyHeight)
-    .width(VKeyWidth)
+    .layoutWeight(1)
     .borderRadius(VKeyRadius)
     .margin(VKeyMargin)
-    .backgroundColor($r('sys.color.black'))
-    .selectedColor($r('sys.color.interactive_active'))
-    .attributeModifier(this.immersiveToggle)
+    .fontSize(VKeyFontSize)
+    .labelStyle(VKeyLabelStyle)
+    .fontWeight(FontWeight.Normal)
+    .fontColor(this.ctrlPressed ? VKeyActiveTextColor : Color.White)
+    .backgroundColor(this.ctrlPressed ? '#2C2C2E' : Color.Black)
+    .stateEffect(true)
+    .accessibilityText('Control')
+    .padding(VKeyPadding)
+    .attributeModifier(this.immersiveButton)
     .onClick(() => action())
   }
 
   @Builder
   toggleShiftKey(name: string, action: () => void) {
-    Toggle({ type: ToggleType.Button, isOn: this.shiftPressed }) {
-      Text(name).fontSize(VKeyFontSize).fontWeight(FontWeight.Medium)
-    }
+    Button(name, { buttonStyle: ButtonStyleMode.TEXTUAL })
     .height(VKeyHeight)
-    .width(VKeyWidth)
+    .layoutWeight(1.15)
     .borderRadius(VKeyRadius)
     .margin(VKeyMargin)
-    .backgroundColor($r('sys.color.black'))
-    .selectedColor($r('sys.color.interactive_active'))
-    .attributeModifier(this.immersiveToggle)
+    .fontSize(VKeyFontSize)
+    .labelStyle(VKeyLabelStyle)
+    .fontWeight(FontWeight.Normal)
+    .fontColor(this.shiftPressed ? VKeyActiveTextColor : Color.White)
+    .backgroundColor(this.shiftPressed ? '#2C2C2E' : Color.Black)
+    .stateEffect(true)
+    .accessibilityText('Shift')
+    .padding(VKeyPadding)
+    .attributeModifier(this.immersiveButton)
     .onClick(() => action())
   }
 
   @Builder
   toggleFnKey(name: string, action: () => void) {
-    Toggle({ type: ToggleType.Button, isOn: this.fnPressed }) {
-      Text(name).fontSize(VKeyFontSize).fontWeight(FontWeight.Medium)
-    }
+    Button(name, { buttonStyle: ButtonStyleMode.TEXTUAL })
     .height(VKeyHeight)
-    .width(VKeyWidth)
+    .layoutWeight(1)
     .borderRadius(VKeyRadius)
     .margin(VKeyMargin)
-    .backgroundColor($r('sys.color.black'))
-    .selectedColor($r('sys.color.interactive_active'))
-    .attributeModifier(this.immersiveToggle)
+    .fontSize(VKeyFontSize)
+    .labelStyle(VKeyLabelStyle)
+    .fontWeight(FontWeight.Normal)
+    .fontColor(this.fnPressed ? VKeyActiveTextColor : Color.White)
+    .backgroundColor(this.fnPressed ? '#2C2C2E' : Color.Black)
+    .stateEffect(true)
+    .accessibilityText('功能键')
+    .padding(VKeyPadding)
+    .attributeModifier(this.immersiveButton)
+    .onClick(() => action())
+  }
+
+  @Builder
+  toggleAltKey(name: string, action: () => void) {
+    Button(name, { buttonStyle: ButtonStyleMode.TEXTUAL })
+    .height(VKeyHeight)
+    .layoutWeight(1)
+    .borderRadius(VKeyRadius)
+    .margin(VKeyMargin)
+    .fontSize(VKeyFontSize)
+    .labelStyle(VKeyLabelStyle)
+    .fontWeight(FontWeight.Normal)
+    .fontColor(this.altPressed ? VKeyActiveTextColor : Color.White)
+    .backgroundColor(this.altPressed ? '#2C2C2E' : Color.Black)
+    .stateEffect(true)
+    .accessibilityText('Alt')
+    .padding(VKeyPadding)
+    .attributeModifier(this.immersiveButton)
     .onClick(() => action())
   }
 
   @Builder
   settingsButton() {
     Button({ buttonStyle: ButtonStyleMode.TEXTUAL }) {
-      Image($r('app.media.gearshape')).width(16).height(16).padding(0)
+      Image($r('app.media.gearshape')).width(18).height(18).padding(0)
     }
     .height(VKeyHeight)
-    .width(VKeyHeight)
+    .width(VKeyWidth)
     .borderRadius(VKeyRadius)
-    .margin(VKeyMargin)
+    .margin({ left: 8, right: 4 })
+    .padding(0)
+    .backgroundColor(Color.Black)
     .attributeModifier(this.immersiveButton)
+    .id('terminal-menu')
+    .accessibilityText($r('app.string.menu_settings'))
     .bindMenu(this.settingsButtonOptions())
   }
 
   private settingsButtonOptions(): MenuElement[] {
-    const vncOptions: MenuElement[] = this.vncEnabled ? [{
-      value: $r('app.string.vnc_console_title'),
-      symbolIcon: new SymbolGlyphModifier($r('sys.symbol.display')).fontSize($r('sys.float.Title_S')),
-      action: () => {
-        const vncEnabled = AppStorage.get<boolean>(appOption.vncEnabled)!!
-        if (vncEnabled) {
-          this.getUIContext().getRouter().pushUrl({
-            url: 'pages/VncPage'
-          });
-        } else {
-          this.getUIContext().getPromptAction().showToast({ message: $r('app.string.vnc_service_not_started') });
-        }
-      }
-    }] : []
-    const regularOptions: MenuElement[] = [{
-      value: $r('app.string.menu_emulator_management'),
-      symbolIcon: new SymbolGlyphModifier($r('sys.symbol.more')).fontSize($r('sys.float.Title_S')),
-      action: () => this.getUIContext().getRouter().pushUrl({ url: 'pages/EmulatorManagementPage' })
+    const options: MenuElement[] = [{
+      value: '重新启动终端',
+      action: () => { void this.confirmRestart(); }
     }, {
-      value: $r('app.string.menu_shared_folder'),
-      symbolIcon: new SymbolGlyphModifier($r('sys.symbol.folder')).fontSize($r('sys.float.Title_S')),
-      action: () => this.getUIContext().getRouter().pushUrl({ url: 'pages/SharedFolderPage' })
+      value: $r('app.string.menu_clear_screen'),
+      action: () => { this.webviewController.runJavaScript('exports.clearScreen()'); }
     }, {
       value: $r('app.string.menu_settings'),
       symbolIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')).fontSize($r('sys.float.Title_S')),
       action: () => this.getUIContext().getRouter().pushUrl({ url: 'pages/SettingsPage' })
-    }]
-    return [...vncOptions, ...regularOptions];
+    }];
+    return options;
+  }
+
+  private async confirmRestart(): Promise<void> {
+    try {
+      const result = await this.getUIContext().getPromptAction().showDialog({
+        title: '重新启动终端',
+        message: '这会结束当前终端和其中的程序。未保存的内容可能丢失。',
+        buttons: [{ text: '取消', color: '#FFFFFF' }, { text: '重新启动', color: '#FF453A' }]
+      });
+      if (result.index === 1) { await this.startNativeSession('shell'); }
+    } catch (error) {
+      hilog.warn(DOMAIN, 'HiSH', 'Restart dialog dismissed');
+    }
   }
 
   @Builder
   hideVKeyButton() {
     Button('▼', { buttonStyle: ButtonStyleMode.TEXTUAL })
       .height(VKeyHeight)
-      .width(VKeyHeight)
+      .width(VKeyWidth)
       .borderRadius(VKeyRadius)
-      .margin(VKeyMargin)
+      .margin({ left: 8, right: 4 })
       .padding({ left: VKeyPadding, right: VKeyPadding })
       .fontColor($r('sys.color.white'))
+      .backgroundColor(Color.Black)
+      .fontSize(VKeyFontSize)
+      .accessibilityText('收起扩展键盘')
       .attributeModifier(this.immersiveButton)
       .onClick(() => {
         this.showVirtKey = false
@@ -253,8 +253,18 @@ export default struct WebTerminal {
         }`
         })
         .backgroundColor('#000')
+        .onLoadIntercept((event) => {
+          if (!event) { return true; }
+          const url = event.data.getRequestUrl().toLowerCase();
+          return !(url.startsWith('resource://rawfile/') || url.startsWith('resource:/rawfile/'));
+        })
         .layoutWeight(1)
-        .bindContextMenu(this.contextMenu(this.webviewController), ResponseType.RightClick)
+        .editMenuOptions({
+          onCreateMenu: (items: TextMenuItem[]): TextMenuItem[] => {
+            return items.filter((item: TextMenuItem) => !item.id.equals(TextMenuItemId.CUT));
+          },
+          onMenuItemClick: (): boolean => false
+        })
       if (this.virtKeyEnabled) {
         if (this.showVirtKey) {
           this.buildVirtualKeys()
@@ -264,6 +274,7 @@ export default struct WebTerminal {
       }
     }
     .height('100%')
+
   }
 
   @Builder
@@ -275,6 +286,7 @@ export default struct WebTerminal {
         .fontSize(16)
         .borderRadius(VKeyRadius)
         .fontColor('#444')
+        .accessibilityText('展开扩展键盘')
         .padding({ left: VKeyPadding, right: VKeyPadding })
         .attributeModifier(this.immersiveButton)
         .onClick(() => {
@@ -289,66 +301,60 @@ export default struct WebTerminal {
     Column() {
       if (this.fnPressed) {
         Row() {
-          this.toggleFnKey('FN', () => this.toggleFn());
-          this.buildVKey('F1', FunctionKeySequences.F1);
+          this.buildVKey('ESC', NormalKeySequences.ESC);
+          this.toggleFnKey('Fn', () => this.toggleFn());
+          this.buildVKey('F1', FunctionKeySequences.F1, undefined, 1.15);
           this.buildVKey('F2', FunctionKeySequences.F2);
-          this.buildVKey('F3', FunctionKeySequences.F3);
-
-          Row().layoutWeight(1);
-
+          this.buildVKey('F3', FunctionKeySequences.F3, undefined, 1.15);
           this.buildVKey('F4', FunctionKeySequences.F4);
           this.buildVKey('F5', FunctionKeySequences.F5);
-          this.buildVKey('F6', FunctionKeySequences.F6);
+          this.buildVKey('F6', FunctionKeySequences.F6, undefined, 1.1);
           this.settingsButton();
         }
-        .margin({ left: 5, right: 5 })
-
-        Row() {
-          this.buildVKey('F7', FunctionKeySequences.F7);
-          this.buildVKey('F8', FunctionKeySequences.F8);
-          this.buildVKey('F9', FunctionKeySequences.F9);
-
-          Row().layoutWeight(1);
-
-          this.buildVKey('F10', FunctionKeySequences.F10);
-          this.buildVKey('F11', FunctionKeySequences.F11);
-          this.buildVKey('F12', FunctionKeySequences.F12);
-          this.hideVKeyButton();
-        }
-        .margin({ left: 5, right: 5 })
-      } else {
-        Row() {
-          this.buildVKey('ESC', NormalKeySequences.ESC);
-          this.toggleFnKey('FN', () => this.toggleFn());
-          this.buildVKey('/', '/', '/');
-
-          Row().layoutWeight(1);
-
-          this.buildVKey('PGUP', NormalKeySequences.PGUP);
-          this.buildVKey('HOME', NormalKeySequences.HOME);
-          this.buildVKey('↑', NormalKeySequences.UP, NormalKeySequences.UP_APP);
-          this.buildVKey('END', NormalKeySequences.END);
-
-          this.settingsButton();
-        }
-        .margin({ left: 5, right: 5 })
+        .width('100%')
 
         Row() {
           this.buildVKey('TAB', NormalKeySequences.TAB);
           this.toggleCtrlKey('CTRL', () => this.toggleCtrl());
-          this.buildVKey('-', '-', '-');
-
-          Row().layoutWeight(1);
-
-          this.buildVKey('PGDN', NormalKeySequences.PGDN);
-          this.buildVKey('←', NormalKeySequences.LEFT, NormalKeySequences.LEFT_APP);
-          this.buildVKey('↓', NormalKeySequences.DOWN, NormalKeySequences.DOWN_APP);
-          this.buildVKey('→', NormalKeySequences.RIGHT, NormalKeySequences.RIGHT_APP);
+          this.buildVKey('F7', FunctionKeySequences.F7, undefined, 1.15);
+          this.buildVKey('F8', FunctionKeySequences.F8);
+          this.buildVKey('F9', FunctionKeySequences.F9, undefined, 1.15);
+          this.buildVKey('F10', FunctionKeySequences.F10);
+          this.buildVKey('F11', FunctionKeySequences.F11);
+          this.buildVKey('F12', FunctionKeySequences.F12, undefined, 1.1);
           this.hideVKeyButton();
         }
-        .margin({ left: 5, right: 5 })
+        .width('100%')
+      } else {
+        Row() {
+          this.buildVKey('ESC', NormalKeySequences.ESC);
+          this.toggleFnKey('Fn', () => this.toggleFn());
+          this.buildVKey('/', '/', '/', 1.15);
+          this.buildVKey('—', '-', '-');
+          this.buildVKey('HOME', NormalKeySequences.HOME, undefined, 1.15);
+          this.buildVKey('↑', NormalKeySequences.UP, NormalKeySequences.UP_APP);
+          this.buildVKey('END', NormalKeySequences.END);
+          this.buildVKey('PGUP', NormalKeySequences.PGUP, undefined, 1.1);
+          this.settingsButton();
+        }
+        .width('100%')
+
+        Row() {
+          this.buildVKey('TAB', NormalKeySequences.TAB);
+          this.toggleCtrlKey('CTRL', () => this.toggleCtrl());
+          this.toggleShiftKey('SHIFT', () => this.toggleShift());
+          this.toggleAltKey('ALT', () => this.toggleAlt());
+          this.buildVKey('←', NormalKeySequences.LEFT, NormalKeySequences.LEFT_APP, 1.15);
+          this.buildVKey('↓', NormalKeySequences.DOWN, NormalKeySequences.DOWN_APP);
+          this.buildVKey('→', NormalKeySequences.RIGHT, NormalKeySequences.RIGHT_APP);
+          this.buildVKey('PGDN', NormalKeySequences.PGDN, undefined, 1.1);
+          this.hideVKeyButton();
+        }
+        .width('100%')
       }
     }
+    .width('100%')
+    .backgroundColor(Color.Black)
   }
 
   async saveShowVirtKey() {
@@ -372,53 +378,91 @@ export default struct WebTerminal {
   private toggleFn(): void {
     this.fnPressed = !this.fnPressed;
   }
+
+  private toggleAlt(): void {
+    this.altPressed = !this.altPressed;
+  }
   //  ============== for javascript in ArkWeb ================
 
   sendInput(data: string): void {
-    hilog.info(DOMAIN, 'WebTerminal', 'sendInput, data: %{public}s', data);
 
-    const modifierResult = applyVirtualKeyModifiers(data, this.ctrlPressed, this.shiftPressed)
+
+    const modifierResult = applyVirtualKeyModifiers(data, this.ctrlPressed, this.shiftPressed, this.altPressed)
     data = modifierResult.data
 
-    if (modifierResult.ctrlConverted) {
-      hilog.info(DOMAIN, 'WebTerminal', 'sendInput with Ctrl, converted to control char');
-    }
     if (modifierResult.shouldResetCtrl) {
       this.toggleCtrl()
     }
-    if (modifierResult.shiftConverted) {
-      hilog.info(DOMAIN, 'WebTerminal', 'sendInput with Shift, converted to: %{public}s', data);
+    if (modifierResult.shouldResetShift) {
+      this.toggleShift()
+    }
+    if (modifierResult.shouldResetAlt) {
+      this.toggleAlt()
+    }
+    const session = this.nativeSession;
+    if (session !== null) {
+      session.send(data);
     }
 
-    let buffer = stringToArrayBuffer(data, 'utf-8');
-    napi.sendInput(buffer)
-
-    // Ctrl: 一次性模式，发送后自动重置 | Shift: 状态保持，需要用户手动点击取消
+    // Ctrl/Shift/Alt 为一次性修饰键；Fn 保持功能键页，手动切回。
   }
+
+  private nativeSession: NativeTerminalSession | null = null;
+  private sessionRevision: number = 0;
+  private terminalColumns: number = 80;
+  private terminalRows: number = 24;
 
   async load(): Promise<void> {
-    this.webviewController.runJavaScript('exports.setFocused(true)')
-    napi.onData((d: ArrayBuffer): void => this.onData(d))
-    napi.onShutdown((): void => {
-      void this.onShutdown()
-    })
-    const vmStatus = AppStorage.get(appOption.currentEmulatorStatus) as string | undefined
-    if (vmStatus === 'ABNORMAL') {
-      const message = this.getUIContext().getHostContext()?.resourceManager.getStringByNameSync('pm_status_qmp_connect_failed')
-        ?? 'Failed to connect to QMP (please restart app)'
-      const text = util.TextEncoder.create('utf-8').encodeInto('\r\n' + message + '\r\n')
-      const base64 = new util.Base64Helper().encodeToStringSync(text)
-      this.webviewController.runJavaScript(`exports.writeBase64("${base64}", ${this.applicationMode})`)
+    this.webviewController.runJavaScript('exports.setFocused(true)');
+    await this.startNativeSession('shell');
+  }
+
+  private async startNativeSession(mode: string): Promise<void> {
+    const revision = ++this.sessionRevision;
+    const old = this.nativeSession;
+    this.nativeSession = null;
+    if (old !== null) { old.close(); }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const root = context.getApplicationContext().filesDir + '/native';
+    try {
+      const session = await NativeTerminalSession.open(root, this.terminalColumns, this.terminalRows,
+        mode, (data: ArrayBuffer): void => {
+          if (revision === this.sessionRevision) { this.onData(data); }
+        }, (): void => {
+          if (revision === this.sessionRevision) {
+            this.writeStatus('终端已结束，可从设置菜单重新启动。');
+          }
+        }, (convertEol: boolean): void => {
+          if (revision === this.sessionRevision) {
+            this.webviewController.runJavaScript('exports.setNativeLineMode(' + convertEol + ')')
+              .catch((error: Error): void => { hilog.warn(DOMAIN, 'HiSH', 'Terminal line-mode update failed'); });
+          }
+        });
+      if (revision !== this.sessionRevision) { session.close(); return; }
+      this.nativeSession = session;
+    } catch (err) {
+      if (revision === this.sessionRevision) {
+        this.writeStatus('原生后端启动失败: ' + (err as Error).message);
+      }
     }
   }
 
-  async resize(width: number, height: number): Promise<void> {
-    hilog.info(DOMAIN, "WebTerminal", 'on resize: %{public}d, %{public}d', width, height)
+  private writeStatus(message: string): void {
+    this.onData(util.TextEncoder.create('utf-8').encodeInto('\r\n' + message + '\r\n').buffer as ArrayBuffer);
+  }
 
-    if (this.resizeTimeout !== undefined) {
-      clearTimeout(this.resizeTimeout!!)
-    }
-    this.resizeTimeout = setTimeout(() => this.sendInput('\x1b' + `[8;${height};${width}t`), 100)
+  resize(width: number, height: number): void {
+    this.terminalColumns = width;
+    this.terminalRows = height;
+    this.nativeSession?.resize(width, height);
+  }
+
+  aboutToDisappear(): void {
+    this.sessionRevision += 1;
+    this.nativeSession?.close();
+    this.nativeSession = null;
+    if (this.flushTimeoutID !== undefined) { clearTimeout(this.flushTimeoutID); }
+    this.pendingChunks = [];
   }
 
   // 性能优化：输出缓冲区
@@ -465,21 +509,6 @@ export default struct WebTerminal {
       // 清空缓冲区
       this.pendingChunks = [];
 
-      // 3. 检测清屏信号
-      // 检查合并后的数据是否包含 \x1b[H\x1b[J 的字面量转义序列
-      if (merged.length >= 12 &&
-        merged[0] === 0x5C && merged[1] === 0x78 && merged[2] === 0x31 && merged[3] === 0x62 && // \x1b
-        merged[4] === 0x5B && merged[5] === 0x48 && // [H
-        merged[6] === 0x5C && merged[7] === 0x78 && merged[8] === 0x31 && merged[9] === 0x62 && // \x1b
-        merged[10] === 0x5B && merged[11] === 0x4A // [J
-      ) {
-        const clearCmd = '\\x1b[3J';
-        const encoder = util.TextEncoder.create('utf-8');
-        const clearBytes = encoder.encodeInto(clearCmd);
-        const clearBase64 = new util.Base64Helper().encodeToStringSync(clearBytes);
-        this.webviewController.runJavaScript(`exports.writeBase64("${clearBase64}", ${this.applicationMode})`);
-      }
-
       // 4. 发送合并后的数据
       const base64Helper = new util.Base64Helper();
       const base64 = base64Helper.encodeToStringSync(merged);
@@ -490,12 +519,6 @@ export default struct WebTerminal {
       // 出错时也要清空缓冲区，避免积压
       this.pendingChunks = [];
     }
-  }
-
-  private async onShutdown() {
-    hilog.info(DOMAIN, 'WebTerminal', 'qemu system exited');
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext
-    await context?.terminateSelf()
   }
 
   getFontSize(): number | null {

@@ -1,0 +1,47 @@
+{
+  "nativeBase": [
+    "libc++_shared.so", "libhish_exec_bridge.so", "libhish_main.so", "libhish_shell.so"
+  ],
+  "arm64Runtime": [
+    "libgcc_s1.so",
+    "libhish_linux_glibc_compat.so", "libhish_linux_glibc_loader.so",
+    "libhish_linux_glibc_tty.so", "libhish_linux_identity_padded.so",
+    "libhish_linux_musl_loader.so"
+  ],
+  "frameworkFiles": [
+    "module.json", "resources.index", "ets/modules.abc", "pack.info", "pkgContextInfo.json",
+    "resources/base/media/app_background.png", "resources/base/media/app_foreground.png",
+    "resources/base/media/app_layered_image.json", "resources/base/media/background.png",
+    "resources/base/media/foreground.png", "resources/base/media/gearshape.svg",
+    "resources/base/media/layered_image.json", "resources/base/media/startIcon.png",
+    "resources/base/profile/backup_config.json", "resources/base/profile/main_pages.json"
+  ],
+  "arktsSources": [
+    "feature/hish_main/Index.ets",
+    "feature/hish_main/src/main/ets/components/WebTerminal.ets",
+    "feature/hish_main/src/main/ets/components/SettingsBase.ets",
+    "feature/hish_main/src/main/ets/components/SettingsContent.ets",
+    "feature/hish_main/src/main/ets/components/OpenSourceContent.ets",
+    "feature/hish_main/src/main/ets/entryability/EntryAbility.ets",
+    "feature/hish_main/src/main/ets/pages/Index.ets",
+    "feature/hish_main/src/main/ets/pages/SettingsPage.ets",
+    "feature/hish_main/src/main/ets/native/NativeTerminalSession.ets",
+    "feature/hish_main/src/main/ets/lib/copyFile.ets",
+    "feature/hish_main/src/main/ets/lib/fileToDataUrl.ets",
+    "feature/hish_main/src/main/ets/lib/immersiveButton.ets",
+    "feature/hish_main/src/main/ets/lib/terminalVirtualKeys.ets",
+    "feature/hish_main/src/main/ets/model/appOption.ets",
+    "product/phone/src/main/ets/entryability/EntryAbility.ets",
+    "product/phone/src/main/ets/pages/Index.ets",
+    "product/phone/src/main/ets/pages/SettingsPage.ets",
+    "product/phone/build/default/generated/r/default/ResourceTable.ts"
+  ],
+  "rawfiles": [
+    "licenses/mksh-COPYRIGHT.txt", "licenses/mksh-terms.txt", "pages/license.html",
+    "term/appearance.js", "term/fonts.css", "term/fonts/LICENSE.txt",
+    "term/fonts/fira-code-regular.woff2", "term/fonts/jetbrains-mono-regular.woff2",
+    "term/fonts/source-code-pro-regular.woff2", "term/native-selection.js",
+    "term/term.css", "term/term.html", "term/term.js", "term/xterm-addon-fit.js",
+    "term/xterm.css", "term/xterm.js"
+  ]
+}

@@ -1,0 +1,9 @@
+.section .rodata.hish_download_probe,"a",@progbits
+.global HiSHDownloadProbeData
+.hidden HiSHDownloadProbeData
+HiSHDownloadProbeData:
+.incbin "@HISH_DOWNLOAD_ABI_DATA@"
+.global HiSHDownloadProbeDataEnd
+.hidden HiSHDownloadProbeDataEnd
+HiSHDownloadProbeDataEnd:
+.section .note.GNU-stack,"",@progbits

@@ -4,16 +4,18 @@ export struct BlockTitle {
 
   build() {
     Text(this.content)
-      .margin({ bottom: 10, left: 20 })
+      .fontSize($r('sys.float.Body_M'))
+      .fontColor($r('sys.color.font_secondary'))
+      .margin({ bottom: 8, left: 16 })
       .width('100%')
   }
 }
 
 export class SettingBlockStyle implements AttributeModifier<ColumnAttribute> {
   applyNormalAttribute(instance: ColumnAttribute): void {
-    instance.borderRadius(20)
+    instance.borderRadius(16)
       .backgroundColor($r('app.color.setting_block_background'))
-      .margin({ bottom: 20 })
+      .margin({ bottom: 24 })
   }
 }
 
@@ -23,11 +25,10 @@ export struct ItemTitle {
   @Prop subTitle: string | Resource
 
   build() {
-    Column() {
+    Column({ space: 4 }) {
       Text(this.title).fontSize($r('sys.float.Body_L')).fontColor($r('sys.color.font_primary'))
-      Text(this.subTitle).fontSize($r('sys.float.Body_M')).fontColor($r('sys.color.font_tertiary'))
+      Text(this.subTitle).fontSize($r('sys.float.Body_M')).fontColor($r('sys.color.font_secondary'))
     }
-    .flexGrow(1)
     .alignItems(HorizontalAlign.Start)
   }
 }
@@ -36,16 +37,21 @@ export struct ItemTitle {
 export struct SettingItem {
   @Prop title: string | Resource
   @Prop subTitle: string | Resource
-  @Prop icon: Resource | undefined
+  @Prop icon: Resource | undefined = undefined
   @BuilderParam content?: () => void
+  @Prop stacked: boolean = false
 
   build() {
 
-    Row() {
+    Flex({ direction: this.stacked ? FlexDirection.Column : FlexDirection.Row,
+      alignItems: this.stacked ? ItemAlign.Start : ItemAlign.Center }) {
       ItemTitle({
         title: this.title,
         subTitle: this.subTitle
       })
+        .layoutWeight(this.stacked ? 0 : 1)
+        .width(this.stacked ? '100%' : undefined)
+        .margin({ bottom: this.stacked ? 8 : 0 })
 
       if (this.content) {
         this.content()
@@ -56,17 +62,16 @@ export struct SettingItem {
           .fontSize('24vp')
       }
     }
-    .alignItems(VerticalAlign.Center)
     .width('100%')
-    .height(56)
+    .constraintSize({ minHeight: 56 })
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
-    .padding({ left: $r('sys.float.padding_level6'), right: $r('sys.float.padding_level6') })
+    .padding(16)
   }
 }
 
 @Component
 export struct LinkItem {
-  @Prop icon?: Resource
+  @Prop icon: Resource | undefined = undefined
   @Prop title: string | Resource
   @Prop subTitle: string | Resource
   click?: () => void
@@ -83,7 +88,7 @@ export struct LinkItem {
         Text(this.title).fontSize($r('sys.float.Body_L')).fontColor($r('sys.color.font_primary'))
         Text(this.subTitle).fontSize($r('sys.float.Body_M')).fontColor($r('sys.color.font_tertiary'))
       }
-      .flexGrow(1)
+      .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
       if (this.click) {
@@ -100,7 +105,7 @@ export struct LinkItem {
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .alignItems(VerticalAlign.Center)
     .width('100%')
-    .height(56)
-    .padding({ left: $r('sys.float.padding_level6'), right: $r('sys.float.padding_level6') })
+    .constraintSize({ minHeight: 56 })
+    .padding(16)
   }
 }

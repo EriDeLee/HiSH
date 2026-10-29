@@ -21,7 +21,7 @@ interface UserFontData {
 }
 
 class appOption {
-  static preferenceName = 'vm_pref'
+  static preferenceName = 'terminal_pref'
   static keepScreenOn = 'appKeepScreenOn'
   static terminalFontSize = 'terminalFontSize'
   static terminalFontFamily = 'terminalFontFamily'    // Current font family selection
@@ -36,33 +36,8 @@ class appOption {
   static terminalUserFonts = 'terminalUserFonts'   // 用户上传字体列表 (JSON: UserFont[])
   static appTempDir = 'appTempDir'
   static appFilesDir = 'appFilesDir'
-  static vmBaseDir = 'vmBaseDir'
-  static rootfsBaseDir = 'rootfsBaseDir'
-  static sharedGuest = 'sharedGuest'
-  static sharedHost = 'sharedHost'
-  static kernel = 'kernel'
-  static portUsedByOthers = 'portUsedByOthers'
-  static emulators = 'emulators'
-  static rootFilesystems = 'rootFilesystems'
-  static defaultStartEmulator = 'defaultStartEmulator'
-  static currentRunningEmulator = 'currentRunningEmulator'
-  static currentEmulatorStatus = 'currentEmulatorStatus'
   static bundleInfo = 'bundleInfo'
-  static temporaryStartEmulator = 'temporaryStartEmulator'
-  static serialChannel = 'serialChannel'
-  static lastResourceVersion = 'lastResourceVersion';
-  static runningInBackground = 'runningInBackground';
-  static displayStatusBar = 'displayStatusBar';
   static showVirtKey = 'showVirtKey';
-  static isPowerManagementOpen = 'isPowerManagementOpen';
-  static vncEnabled = 'vncEnabled';
-  static vncPortMode = 'vncPortMode'; // 'local' | 'lan'
-  static vncPort = 'vncPort';         // VNC port number (e.g. 5900)
-  // qemu-img 后台任务状态
-  static qemuImgTaskRunning = 'qemuImgTaskRunning';
-  static qemuImgTaskDescription = 'qemuImgTaskDescription';
-  // QGA 连接状态 (Global Truth)
-  static isQgaConnected = 'isQgaConnected';
 }
 
 async function savePreference(key: string, value: object | string | boolean | number, context: UIContext) {

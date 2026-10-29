@@ -1,7 +1,6 @@
 import { ComposeTitleBar } from '@kit.ArkUI'
 import SettingsContent from '../components/SettingsContent'
 
-@Entry
 @Component
 export struct SettingsPage {
   build() {

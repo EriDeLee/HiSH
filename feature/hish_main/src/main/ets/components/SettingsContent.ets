@@ -2,13 +2,12 @@ import { CustomContentDialog, window } from '@kit.ArkUI';
 import { common, Want, bundleManager } from '@kit.AbilityKit';
 import preference from '@ohos.data.preferences';
 import { picker } from '@kit.CoreFileKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import fs from '@ohos.file.fs';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import appOption, { CursorShape, savePreference, UserFont } from '../model/appOption';
 import { OpenSourceContent } from './OpenSourceContent';
 import { BlockTitle, LinkItem, SettingBlockStyle, SettingItem } from './SettingsBase';
-import deviceInfo from '@ohos.deviceInfo';
-import { backgroundRunningManager } from '../lib/backgroundRunningManager';
 import copyFile from '../lib/copyFile';
 import { ImmersiveButtonModifier } from '../lib/immersiveButton';
 
@@ -38,11 +37,6 @@ const fontSizeOptions: SelectOption[] = [{
 
 const cursorShapeOptions: SelectOption[] = [{ value: 'BLOCK' }, { value: 'BEAM' }, { value: 'UNDERLINE' }]
 
-const vncPortModeOptions: SelectOption[] = [
-  { value: $r('app.string.setting_vnc_port_mode_local') },
-  { value: $r('app.string.setting_vnc_port_mode_lan') }
-]
-
 @Component
 export default struct SettingsContent {
   @Watch('saveKeepScreenOn') @StorageProp(appOption.keepScreenOn) keepScreenOn: boolean = false
@@ -59,11 +53,6 @@ export default struct SettingsContent {
   @Watch('saveTermBackgroundBlur') @StorageProp(appOption.terminalBackgroundBlur) termBackgroundBlur: number = 0
   @Watch('saveTermUserFonts') @StorageProp(appOption.terminalUserFonts) userFonts: UserFont[] = []
   @State colorInput: string = ''
-  @Watch('saveRunningInBackground') @StorageProp(appOption.runningInBackground) runningInBackground: boolean = false
-  @Watch('saveDisplayStatusBar') @StorageProp(appOption.displayStatusBar) displayStatusBar: boolean = false
-  @Watch('saveVncEnabled') @StorageProp(appOption.vncEnabled) vncEnabled: boolean = false
-  @Watch('saveVncPortMode') @StorageProp(appOption.vncPortMode) vncPortMode: string = 'local'
-  @Watch('saveVncPort') @StorageProp(appOption.vncPort) vncPort: number = 5900
   @StorageProp('bundleInfo') bundleInfo?: bundleManager.BundleInfo = undefined
   @StorageProp('versionCode') versionCode: number = 0
   openSourceController: CustomDialogController = new CustomDialogController({
@@ -150,7 +139,7 @@ export default struct SettingsContent {
   @Builder
   private buildTerminalFontFamily() {
     Select(this.buildFontFamilyOptions())
-      .width(240)
+      .width('100%')
       .value(this.terminalFontFamily)
       .onSelect((_i, value) => AppStorage.setOrCreate(appOption.terminalFontFamily, value))
   }
@@ -287,62 +276,9 @@ export default struct SettingsContent {
   }
 
   @Builder
-  private setRunningInBackground() {
-    Checkbox()
-      .select(this.runningInBackground)
-      .onChange((value: boolean) => {
-        AppStorage.setOrCreate(appOption.runningInBackground, value)
-      })
-  }
-
-  @Builder
-  private setDisplayStatusBar() {
-    Checkbox()
-      .select(this.displayStatusBar)
-      .onChange((value: boolean) => {
-        AppStorage.setOrCreate(appOption.displayStatusBar, value)
-        this.showDisplayStatusBarToast(value)
-      })
-  }
-
-  @Builder
-  private buildVncEnabled() {
-    Checkbox()
-      .select(this.vncEnabled)
-      .onChange((value: boolean) => {
-        AppStorage.setOrCreate(appOption.vncEnabled, value)
-      })
-  }
-
-  @Builder
-  private buildVncPortMode() {
-    Select(vncPortModeOptions)
-      .width(100)
-      .value(this.vncPortMode === 'lan' ?
-        $r('app.string.setting_vnc_port_mode_lan') :
-        $r('app.string.setting_vnc_port_mode_local'))
-      .onSelect((_i, _value) => {
-        const mode = _i === 1 ? 'lan' : 'local'
-        AppStorage.setOrCreate(appOption.vncPortMode, mode)
-      })
-  }
-
-  @Builder
-  private buildVncPort() {
-    TextInput({ text: this.vncPort.toString(), placeholder: '5900' })
-      .width(80)
-      .type(InputType.Number)
-      .onChange((value) => {
-        const port = value ? parseInt(value) : 5900
-        const clamped = Math.min(Math.max(port, 5900), 5999)
-        AppStorage.setOrCreate(appOption.vncPort, clamped)
-      })
-  }
-
-  @Builder
   private buildTerminalCursorShape() {
     Select(cursorShapeOptions)
-      .width(160)
+      .width('100%')
       .value(this.termCursorShape.toString())
       .onSelect((_i, value) => AppStorage.setOrCreate(appOption.terminalCursorShape, value))
   }
@@ -378,6 +314,7 @@ export default struct SettingsContent {
 
             SettingItem({
               title: $r('app.string.setting_font_family'),
+              stacked: true,
               subTitle: $r('app.string.setting_font_family_desc'),
               content: () => {
                 this.buildTerminalFontFamily()
@@ -434,6 +371,7 @@ export default struct SettingsContent {
 
             SettingItem({
               title: $r('app.string.setting_cursor_style'),
+              stacked: true,
               subTitle: $r('app.string.setting_cursor_style_desc'),
               content: () => {
                 this.buildTerminalCursorShape()
@@ -475,6 +413,7 @@ export default struct SettingsContent {
 
             SettingItem({
               title: $r('app.string.setting_background_blur'),
+              stacked: true,
               subTitle: $r('app.string.setting_background_blur_desc'),
               content: () => {
                 this.buildBackgroundBlurSlider()
@@ -483,103 +422,14 @@ export default struct SettingsContent {
           }
           .attributeModifier(this.blockStyle)
 
-          BlockTitle({ content: $r('app.string.setting_vnc') })
-          Column() {
-            SettingItem({
-              title: $r('app.string.setting_enable_vnc'),
-              subTitle: $r('app.string.setting_vnc_restart_hint'),
-              content: () => {
-                this.buildVncEnabled()
-              }
-            }).onClick(() => {
-              AppStorage.setOrCreate(appOption.vncEnabled, !this.vncEnabled)
-            })
-            SettingItem({
-              title: $r('app.string.setting_vnc_port_mode'),
-              subTitle: $r('app.string.setting_vnc_port_mode_desc'),
-              content: () => {
-                this.buildVncPortMode()
-              }
-            })
-            SettingItem({
-              title: $r('app.string.setting_vnc_port'),
-              subTitle: $r('app.string.setting_vnc_port_desc'),
-              content: () => {
-                this.buildVncPort()
-              }
-            })
-          }
-          .attributeModifier(this.blockStyle)
-
-          BlockTitle({ content: $r('app.string.setting_running') })
-          Column() {
-            SettingItem({
-              title: $r('app.string.force_run_in_background'),
-              subTitle: $r('app.string.force_background_desc'),
-              content: () => {
-                this.setRunningInBackground()
-              }
-            }).onClick(() => {
-              AppStorage.setOrCreate(appOption.runningInBackground, !this.runningInBackground)
-            })
-            SettingItem({
-              title: $r('app.string.display_status_bar'),
-              subTitle: $r('app.string.guest_status_bar_desc'),
-              content: () => {
-                this.setDisplayStatusBar()
-              }
-            }).onClick(() => {
-              const value: boolean = !this.displayStatusBar;
-              AppStorage.setOrCreate(appOption.displayStatusBar, value)
-              this.showDisplayStatusBarToast(value)
-            })
-          }
-          .attributeModifier(this.blockStyle)
-
           BlockTitle({ content: $r('app.string.setting_block_help') })
           Column() {
-
-            if (deviceInfo.deviceType !== '2in1') {
-              LinkItem({
-                icon: $r('sys.symbol.book_pages'),
-                title: $r('app.string.user_guide_title'),
-                click: () => {
-                  this.getUIContext().getRouter().pushUrl({
-                    url: 'pages/UserGuidePage'
-                  })
-                }
-              })
-            }
-
-            if (this.bundleInfo?.name === 'app.hackeris.hish') {
-              LinkItem({
-                icon: $r('sys.symbol.star'),
-                title: $r('app.string.like_this_app'),
-                click: () => {
-                  const want: Want = {
-                    uri: `store://appgallery.huawei.com/app/detail?id=${this.bundleInfo?.name}`
-                  };
-                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-                  context.startAbility(want)
-                }
-              })
-              LinkItem({
-                icon: $r('sys.symbol.fast_forward'),
-                title: $r('app.string.fast_code_jit'),
-                click: () => {
-                  this.getUIContext().getRouter().pushUrl({
-                    url: 'pages/GuideWebPage',
-                    params: { page: 'guide/Z1_Jit.html', title: $r('app.string.guide_jit_title') }
-                  })
-                }
-              })
-            }
 
             LinkItem({
               icon: $r('sys.symbol.house'),
               title: $r('app.string.code_repository'),
               click: () => {
-                this.toWebBrowser('https://github.com/harmoninux/hish')
+                this.toWebBrowser('https://github.com/EriDeLee/HiSH')
               }
             })
 
@@ -601,14 +451,14 @@ export default struct SettingsContent {
           }
           .attributeModifier(this.blockStyle)
         }
-        .margin(10)
+        .margin(16)
       }
       .scrollable(ScrollDirection.Vertical)
       .scrollBar(BarState.Auto)
       .scrollBarWidth(1)
       .layoutWeight(1)
       .align(Alignment.Top)
-      .padding({ bottom: 50 })
+      .padding({ bottom: 24 })
     }
   }
 
@@ -626,11 +476,14 @@ export default struct SettingsContent {
 
       Text($r('app.string.app_name'))
         .margin({ top: 10 })
+      Text('Based on HiSH · https://github.com/harmoninux/HiSH')
+        .fontSize(12)
+        .margin({ top: 10 })
 
       Text(`${this.bundleInfo?.versionName}(${this.bundleInfo?.versionCode})`)
-        .fontSize(14)
-        .fontColor('#ccc')
-        .margin({ top: 5 })
+        .fontSize($r('sys.float.Body_M'))
+        .fontColor($r('sys.color.font_secondary'))
+        .margin({ top: 8 })
     }
     .width('100%')
   }
@@ -763,10 +616,10 @@ export default struct SettingsContent {
   private async pickBackgroundImage(): Promise<void> {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const options = new picker.PhotoSelectOptions();
-      options.MIMEType = picker.PhotoViewMIMETypes.IMAGE_TYPE;
+      const options = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
       options.maxSelectNumber = 1;
-      const photoPicker = new picker.PhotoViewPicker(context);
+      const photoPicker = new photoAccessHelper.PhotoViewPicker();
       const result = await photoPicker.select(options);
       if (result.photoUris.length === 0) {
         return
@@ -779,9 +632,9 @@ export default struct SettingsContent {
       if (!fs.accessSync(bgDir, fs.AccessModeType.EXIST)) {
         fs.mkdirSync(bgDir)
       }
-      this.deleteBackgroundImageFile()
       const fileName = `background_${Date.now()}.${ext}`
       await copyFile(uri, `${bgDir}/${fileName}`)
+      this.deleteBackgroundImageFile()
       AppStorage.setOrCreate(appOption.terminalBackgroundImage, fileName)
     } catch (e) {
       hilog.error(DOMAIN, 'SettingsContent', 'pickBackgroundImage failed: %{public}s', JSON.stringify(e))
@@ -808,51 +661,5 @@ export default struct SettingsContent {
     }
   }
 
-  async saveRunningInBackground() {
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    if (this.runningInBackground) {
-      const success = await backgroundRunningManager.grantLocationPermission(context)
-      if (!success) {
-        this.getUIContext().getPromptAction().showToast({
-          message: $r('app.string.failed_to_force_background'),
-          duration: 5000
-        })
-      }
-    }
-    await savePreference(appOption.runningInBackground, this.runningInBackground, this.getUIContext())
-  }
 
-  async saveDisplayStatusBar() {
-    await savePreference(appOption.displayStatusBar, this.displayStatusBar, this.getUIContext())
-  }
-
-  showDisplayStatusBarToast(value: boolean) {
-    if(value) {
-      this.getUIContext().getPromptAction().showToast({
-        message: $r('app.string.guest_status_bar_toast'),
-        duration: 5000
-      })
-    }
-  }
-
-  async saveVncEnabled() {
-    await savePreference(appOption.vncEnabled, this.vncEnabled, this.getUIContext())
-  }
-
-  showVncRestartToast() {
-    this.getUIContext().getPromptAction().showToast({
-      message: $r('app.string.setting_vnc_restart_hint'),
-      duration: 3000
-    })
-  }
-
-  async saveVncPortMode() {
-    await savePreference(appOption.vncPortMode, this.vncPortMode, this.getUIContext())
-    this.showVncRestartToast()
-  }
-
-  async saveVncPort() {
-    await savePreference(appOption.vncPort, this.vncPort, this.getUIContext())
-    this.showVncRestartToast()
-  }
 }

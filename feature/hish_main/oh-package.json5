@@ -1,7 +1,7 @@
 {
   "name": "hish_main",
   "version": "1.0.0",
-  "description": "HiSH main shared module with JIT support",
+  "description": "HiSH native terminal UI and process bridge",
   "main": "Index.ets",
   "author": "",
   "license": "",

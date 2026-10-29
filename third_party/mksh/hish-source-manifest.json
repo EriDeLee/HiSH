@@ -1,0 +1,211 @@
+{
+  "url": "https://codeload.github.com/openharmony/third_party_mksh/tar.gz/88b0a4a12f2c219c1421ce5a3b90b97b785a08ad",
+  "commit": "88b0a4a12f2c219c1421ce5a3b90b97b785a08ad",
+  "sha256": "3b9e70fa43e8f8369ef8223f3e475279c071c442bfe22fda286f703c6904135d",
+  "files": [
+    {
+      "name": ".gitee/ISSUE_TEMPLATE.zh-CN.md",
+      "sha256": "8f2f32430afbf6f34cfbcb24b365453048d9f3e5c9ec57673468a0dcd88f4b2c"
+    },
+    {
+      "name": ".gitee/PULL_REQUEST_TEMPLATE.zh-CN.md",
+      "sha256": "6acb93f22e533469979a35d30c8e2faf77b1e2ddb7ab6821a30f8ea9d03eacb4"
+    },
+    {
+      "name": ".mkshrc",
+      "sha256": "855d2ff305d9e13d69f3bc95b051a46970d933d34358832df6b273b3a07a1c85"
+    },
+    {
+      "name": "BUILD.gn",
+      "sha256": "841a504a4158781a43e63783f8536facebd7eeb39faab8aab64f21e26ce80b64"
+    },
+    {
+      "name": "Build.sh",
+      "sha256": "3cb6a2b168a9be7770372518bc9fa1e013d6d04d1a939d1392986565a6700819"
+    },
+    {
+      "name": "COPYRIGHT",
+      "sha256": "3500d885194b9a04fae3e31ba085042758478485662c0cc1c2d6410278680237"
+    },
+    {
+      "name": "FAQ2HTML.sh",
+      "sha256": "2a55def59a1274e1fcde9ec331f4831b907d327d885c5c7c25a5817e6f2585bb"
+    },
+    {
+      "name": "OAT.xml",
+      "sha256": "38fb58d08fb7d90829bc65d637c4bffbed88150b3a7583ca830a8481ef7ef657"
+    },
+    {
+      "name": "README.OpenSource",
+      "sha256": "84e8d6144f57da480219f090be95b5f16750daca07c5b9a8d9beb4114861cc2b"
+    },
+    {
+      "name": "README_zh.md",
+      "sha256": "28ed275765e82530e836a1d380bb93fe32f77ac4f3ed4e6211a5d6d5f66acf17"
+    },
+    {
+      "name": "TaC-mksh.txt",
+      "sha256": "8a53fe4d643fb7341e6c94653d63d3d813d8d849fc1d9dfe5dc49ab2fb48aee9"
+    },
+    {
+      "name": "bundle.json",
+      "sha256": "cd61b73e937aed12e4bc4138b381ff434233c13725deddaa98a2d75615e4fda2"
+    },
+    {
+      "name": "check.pl",
+      "sha256": "db419075d1f50549db08ea60568959bae9690e3becb6789442f129d6f4f60cf9"
+    },
+    {
+      "name": "check.t",
+      "sha256": "15706ece3516b5f881f84649fc88aa8463b022630b8c54326176e53947c4ee40"
+    },
+    {
+      "name": "dot.mkshrc",
+      "sha256": "b37505bfa933b14e512f79a8d95547c72bf55483a21a41dd0772767956ed21e6"
+    },
+    {
+      "name": "edit.c",
+      "sha256": "0c3787f19216a8d5281c2a7741e721f8a5bd8caa6c87479be7b7a7dced2873fe"
+    },
+    {
+      "name": "emacsfn.h",
+      "sha256": "9eaa1c7ef14fa0fd7dec0f29a414370bee29e51db9567eab6c7f6701bee04c10"
+    },
+    {
+      "name": "eval.c",
+      "sha256": "9b718571d0b845f44da010d6aa20bdcda89627a84b45ba37cdb9601a97530118"
+    },
+    {
+      "name": "exec.c",
+      "sha256": "b37887767eaf9a196e31e458508c0f9437c96057bf1dbcceaf058ff3c9d9488f"
+    },
+    {
+      "name": "expr.c",
+      "sha256": "400331c51386570d668b0645bae9aa737b927759d1f1ab35d258753b145a859c"
+    },
+    {
+      "name": "exprtok.h",
+      "sha256": "7592f4dc166b0bb3f4da98953e18e64c377f37bb51c556622f9a4c0e69865338"
+    },
+    {
+      "name": "funcs.c",
+      "sha256": "3dc6353123bc762461cf75ff25c7d7dd55e45e317c9bd4d1f60950dfb32d9e91"
+    },
+    {
+      "name": "histrap.c",
+      "sha256": "2b1a321f40c952e9feec39e07b322f42db36095231d7df9ed561328dccfb79f4"
+    },
+    {
+      "name": "jehanne.c",
+      "sha256": "009cef27e16b255d4294e02a835d15bbc227645730909b6664f37c166b46fd9c"
+    },
+    {
+      "name": "jobs.c",
+      "sha256": "997965d65a1a9ea54a3b03504a5ed9650303650b602ab04b21fe247a77fe3181"
+    },
+    {
+      "name": "lalloc.c",
+      "sha256": "3b91d0495b63d014ba2c6202805a5fe0b9c23155571f1d29e293930827d998b2"
+    },
+    {
+      "name": "lex.c",
+      "sha256": "1ab263c5a086b9db3bfbeb07163c82af8b29b400cd336dea5e703e690d11d6a6"
+    },
+    {
+      "name": "lksh.1",
+      "sha256": "3e05b124eaa92cc21ecbb7e341001c03aa17ef1ec0e385b19e1eccab20076fdd"
+    },
+    {
+      "name": "main.c",
+      "sha256": "10c0f03b7c0d9481c580d949d688b7d71101b77c0eb151dba1aaf765c6fecb04"
+    },
+    {
+      "name": "mirhash.h",
+      "sha256": "53dc8c2099fc2c565453e45b5db5203da0be1fffb660fdd0d51e0a9ce3f95274"
+    },
+    {
+      "name": "misc.c",
+      "sha256": "09465ff27c5ecf2a4b502ea2d2d9ffc8229509c49606752ae0001ff3574e8e45"
+    },
+    {
+      "name": "mksh.1",
+      "sha256": "abf44a61ec777c98f8ae7e08e4fe25fe258e0c470215e2eeb22816f6bae72c80"
+    },
+    {
+      "name": "mksh.faq",
+      "sha256": "729aae9db34cb444ac028c19d9d7dd1a8400198a6995f5b4a8171a2a158e05df"
+    },
+    {
+      "name": "mksh.gni",
+      "sha256": "0c568495ea89edd69622ab9a0a35ce899c37c7a6e9b9db1d14ad7073e83e9457"
+    },
+    {
+      "name": "mksh.ico",
+      "sha256": "c3a72342b85351379c5174d2e15f6e94ac5f83c80e8258c1a4f5d044837cd5b4"
+    },
+    {
+      "name": "os2.c",
+      "sha256": "d56ca0de53b0030e5c9cc6324dc54d46994e5234d0600dc5943521e2466c8143"
+    },
+    {
+      "name": "rlimits.gen",
+      "sha256": "3c04cbb447ba71e6919f8e1259097e098be500e97f799b282ddb16660df946a9"
+    },
+    {
+      "name": "rlimits.opt",
+      "sha256": "e5e2433f5e9cc446f157194974a76c6bf9980c2858ad7917d0fbea801c0b806e"
+    },
+    {
+      "name": "sh.h",
+      "sha256": "d3475fc4e6340cc2d7254599b2c2a24f56dd517ce342e9126037b8260acad350"
+    },
+    {
+      "name": "sh_flags.gen",
+      "sha256": "88bf8b825a8cf6c1bc3a46b05a88ad21b69f70c8f2b02ea7d5bbe1e8746fee60"
+    },
+    {
+      "name": "sh_flags.opt",
+      "sha256": "aff73b4d3d261e326ce0a70a690b0991a4593b1da1dd8462b67482d472b3f26f"
+    },
+    {
+      "name": "shf.c",
+      "sha256": "ceec362ea63b210ebfa1e10e5a78dda70ca93a29c9408c1f87c722e798faccd5"
+    },
+    {
+      "name": "signames.inc",
+      "sha256": "bee0adf5d1910d2703d85c3e638463bf14f6a6e3500a4e125033829b8dab2430"
+    },
+    {
+      "name": "strlcpy.c",
+      "sha256": "5f619b9dad34a9ac9b9dda307b0b80c5b26a6d427a5a64cc8040c2ad457d7625"
+    },
+    {
+      "name": "syn.c",
+      "sha256": "f489276a8b2054d05ba7dd9c4ae6de910a09a726e42932960d3474846eceddf1"
+    },
+    {
+      "name": "tab_cmd.h",
+      "sha256": "3c8ed840612266f0660ee1c453462e41016185d0846f47b16d14ba2ce5c55240"
+    },
+    {
+      "name": "tree.c",
+      "sha256": "a60a67be231261ddd8f759ba57792affe496a88170fb682dbe0bc1221beca431"
+    },
+    {
+      "name": "ulimit.c",
+      "sha256": "3c6bbef4f4f7fbb7475ed361534efee85ea24108edeacb662f12dd5770a9dcb4"
+    },
+    {
+      "name": "ulimits.opt",
+      "sha256": "1924669cf6148e2233df7add6899f84eb02be2a918b4e918229eb43c0e605962"
+    },
+    {
+      "name": "var.c",
+      "sha256": "57d36e34d26678e52d47954fb56e5091eaa5ea3165dbc23c47f9021cdf6a06f3"
+    },
+    {
+      "name": "var_spec.h",
+      "sha256": "b1b28f554e9e951ba3e9d5ff633c412dff0228470b556cfc7900ce39cc2a38b1"
+    }
+  ]
+}

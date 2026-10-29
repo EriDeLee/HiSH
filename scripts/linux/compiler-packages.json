@@ -1,0 +1,5 @@
+[
+  {"kind":"tcc-source","file":"tinycc-5fad6dc4a3cdb7c9094129a4c76e5d2599e94414.tar.gz","url":"https://codeload.github.com/TinyCC/tinycc/tar.gz/5fad6dc4a3cdb7c9094129a4c76e5d2599e94414","sha256":"d9552e13f20e91d28ebd2dcb47952a01cf56d5abab2f441eca336d6b38482aa0"},
+  {"kind":"musl","file":"tcc-dev-0.9.27_git20250619-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/community/aarch64/tcc-dev-0.9.27_git20250619-r0.apk","sha256":"c8bd290da1c0ffa1ac8479d3b25e44fc87bf5e115a060a19a8c5ed3fa6445963"},
+  {"kind":"musl","file":"tcc-libs-static-0.9.27_git20250619-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/community/aarch64/tcc-libs-static-0.9.27_git20250619-r0.apk","sha256":"142aa53f6d9cbfd639f69a7221a2a1d807b286b0311d748af56d84c3d7768f47"}
+]

@@ -1,394 +1,43 @@
 import { CustomContentDialog } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import WebTerminal from '../components/WebTerminal'
+import WebTerminal from '../components/WebTerminal';
 import SettingsContent from '../components/SettingsContent';
-import { SharedFolderContent } from '../components/SharedFolderContent';
-import appOption from "../model/appOption";
-import { util } from "@kit.ArkTS";
-import EmulatorListGrid from "../components/EmulatorListGrid";
-import EditEmulatorContent from "../components/EditEmulatorContent";
-import { Emulator } from "../model/Emulator";
-import RootfsManagementContent from "../components/RootfsManagementContent";
-import UserGuide from "../components/UserGuide";
-import { webview } from "@kit.ArkWeb";
-import VmStatusBar from '../components/VmStatusBar';
-import { ImmersiveButtonModifier, ImmersivePrimaryButtonModifier } from '../lib/immersiveButton';
-
-@Component
-struct PcIndex {
-  @StorageProp(appOption.sharedHost) sharedHost?: string = undefined
-  @StorageProp(appOption.sharedGuest) sharedGuest?: string = undefined
-  @StorageProp(appOption.displayStatusBar) displayStatusBar: boolean = false
-  emulatorManagementController: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      primaryTitle: $r('app.string.emulator_management_title'),
-      contentBuilder: () => {
-        this.buildSimulatorManagement();
-      }
-    })
-  })
-  rootfsManagementController: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      primaryTitle: $r('app.string.image_management_title'),
-      contentBuilder: () => {
-        this.buildRootfsManagement();
-      }
-    })
-  })
-  sharedFolderController: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      primaryTitle: $r('app.string.setting_shared_folder'),
-      contentBuilder: () => {
-        this.buildSharedFolder();
-      }
-    })
-  })
-  settingController: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      primaryTitle: $r('app.string.Setting_title'),
-      contentBuilder: () => {
-        this.buildSettings();
-      }
-    }),
-    // 2in1 窗口较宽，弹窗默认最大 400vp 过窄，按窗口比例放宽
-    width: '60%'
-  })
-  userGuideController: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      primaryTitle: $r('app.string.user_guide_title'),
-      contentBuilder: () => {
-        this.buildGuideList();
-      }
-    })
-  })
-  webController = new webview.WebviewController()
-  immersiveButton: ImmersiveButtonModifier = new ImmersiveButtonModifier()
-  immersivePrimaryButton: ImmersivePrimaryButtonModifier = new ImmersivePrimaryButtonModifier()
-
-  build() {
-    Column() {
-      Row() {
-        Row() {
-          Image($r('app.media.startIcon'))
-            .width(20)
-          Text($r('app.string.EntryAbility_label'))
-            .fontColor($r('sys.color.white'))
-            .margin({ left: 10 })
-        }
-
-        if (this.displayStatusBar) {
-          VmStatusBar({ reactive: false })
-            .margin({ left: 20 })
-        }
-
-        Blank()
-
-        Row() {
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            SymbolGlyph($r('sys.symbol.display'))
-              .fontSize('20vp')
-              .width(20)
-              .height(20)
-              .fontColor(['#ffffff'])
-          }
-          .borderRadius(4)
-          .padding(4)
-          .margin({ right: 10 })
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            const vncEnabled = AppStorage.get<boolean>(appOption.vncEnabled)!!
-            if (vncEnabled) {
-              this.getUIContext().getRouter().pushUrl({
-                url: 'pages/VncPage'
-              });
-            } else {
-              this.getUIContext().getPromptAction().showToast({ message: $r('app.string.vnc_service_not_started') });
-            }
-          })
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            SymbolGlyph($r('sys.symbol.more'))
-              .fontSize('20vp')
-              .width(20)
-              .height(20)
-              .fontColor(['#ffffff'])
-          }
-          .borderRadius(4)
-          .padding(4)
-          .margin({ right: 10 })
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            this.emulatorManagementController.open()
-          })
-
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            SymbolGlyph($r('sys.symbol.externaldrive_3'))
-              .fontSize('20vp')
-              .width(20)
-              .height(20)
-              .fontColor(['#ffffff'])
-          }
-          .borderRadius(4)
-          .padding(4)
-          .margin({ right: 10 })
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            this.rootfsManagementController.open()
-          })
-
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            Image($r('app.media.folder')).width(20)
-          }
-          .borderRadius(4)
-          .padding(4)
-          .margin({ right: 10 })
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            this.sharedFolderController.open()
-          })
-
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            Image($r('app.media.gearshape')).width(20)
-          }
-          .borderRadius(4)
-          .padding(4)
-          .margin({ right: 10 })
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            this.settingController.open()
-          })
-
-          Button({
-            type: ButtonType.Normal,
-            buttonStyle: ButtonStyleMode.TEXTUAL,
-            controlSize: ControlSize.SMALL
-          }) {
-            SymbolGlyph($r('sys.symbol.book_pages'))
-              .fontSize('20vp')
-              .width(20)
-              .height(20)
-              .fontColor(['#ffffff'])
-          }
-          .borderRadius(4)
-          .padding(4)
-          .attributeModifier(this.immersiveButton)
-          .onClick((event: ClickEvent) => {
-            this.userGuideController.open()
-          })
-        }
-      }
-      .width('100%')
-      .height(48)
-      .padding({
-        left: 15,
-        right: 150,
-      })
-
-      WebTerminal({ virtKeyEnabled: false })
-        .layoutWeight(1)
-    }
-    .width("100%")
-    .height('100%')
-  }
-
-  @Builder
-  buildSimulatorManagement() {
-    Column() {
-      EmulatorListGrid({
-        onEditEmulator: (item, edit) => {
-          this.openEditEmulatorDialog(item, edit);
-        },
-        specifiedBreak: 'xs'
-      })
-      Button($r('app.string.btn_add'))
-        .width('100%')
-        .fontColor($r('sys.color.interactive_active'))
-        .attributeModifier(this.immersivePrimaryButton)
-        .onClick(() => {
-          const id = util.generateRandomUUID()
-          const emulatorToEdit: Emulator = {
-            id,
-            name: '',
-            init: '/init',
-            cpu: 1,
-            memory: 512,
-            portMapping: [],
-            rootVda: '/dev/sda',
-            rootFilesystem: '',
-            sharedFolderReadonly: false
-          }
-          this.openEditEmulatorDialog(emulatorToEdit, true)
-        })
-    }
-  }
-
-  private openEditEmulatorDialog(item: Emulator, edit: boolean) {
-    const emulatorToEdit: Emulator = {
-      id: item.id,
-      name: item.name,
-      init: item.init,
-      cpu: item.cpu,
-      memory: item.memory,
-      portMapping: item.portMapping,
-      rootVda: item.rootVda,
-      rootFilesystem: item.rootFilesystem,
-      sharedFolderReadonly: item.sharedFolderReadonly
-    };
-    const controller = new CustomDialogController({
-      builder: CustomContentDialog({
-        primaryTitle: edit ? $r('app.string.edit_emulator_title') : item.name,
-        contentBuilder: () => {
-          this.buildEditEmulator(emulatorToEdit, edit, (): void => controller.close());
-        }
-      })
-    });
-    controller.open();
-  }
-
-  @Builder
-  buildRootfsManagement() {
-    Column() {
-      RootfsManagementContent({
-        toolBar: false,
-        specifiedBreak: 'xs'
-      })
-    }
-  }
-
-  @Builder
-  buildEditEmulator(emulator: Emulator, edit: boolean, onFinished: (item: Emulator) => void) {
-    EditEmulatorContent({
-      emulator: emulator,
-      onFinished: onFinished,
-      specifiedBreak: 'xs',
-      titleBar: false,
-      editing: edit
-    })
-  }
-
-  @Builder
-  buildGuideList() {
-    UserGuide({
-      openPage: (title: string | Resource, url: string) => {
-        const controller = new CustomDialogController({
-          builder: CustomContentDialog({
-            primaryTitle: title,
-            contentBuilder: () => {
-              this.buildGuideWebView(url);
-            }
-          })
-        })
-        controller.open()
-      }
-    })
-  }
-
-  @Builder
-  private buildGuideWebView(url: string) {
-    Web({
-      src: $rawfile(url),
-      controller: this.webController
-    }).javaScriptProxy({
-      permission: `{
-          "javascriptProxyPermission": {
-            "urlPermissionList": [
-              {
-                "scheme": "resource",
-                "host": "rawfile",
-                "port": "",
-                "path": ""
-              }
-            ]
-          }
-        }`,
-      object: this,
-      name: 'native',
-      methodList: [],
-      controller: this.webController
-    })
-      .width('100%')
-      .height('100%')
-      .backgroundColor($r('sys.color.black'));
-  }
-
-  @Builder
-  buildSettings() {
-    SettingsContent()
-  }
-
-  @Builder
-  buildSharedFolder() {
-    Row() {
-      if (this.sharedHost) {
-        SharedFolderContent({
-          host: this.sharedHost,
-          guest: this.sharedGuest
-        })
-      }
-    }
-  }
-}
-
-@Component
-struct PhoneOrTablet {
-  @StorageProp(appOption.displayStatusBar) displayStatusBar: boolean = false
-
-  build() {
-    Column() {
-      if (this.displayStatusBar) {
-        // 虚拟机状态监控条
-        Row() {
-          VmStatusBar({ reactive: true })
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(28)
-        .padding({ left: 6, right: 6 })
-        .backgroundColor($r('sys.color.ohos_id_color_sub_background'))
-      }
-
-      WebTerminal({ virtKeyEnabled: true })
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height('100%')
-  }
-}
 
 @Component
 export struct Index {
-  isPc: boolean = deviceInfo.deviceType === '2in1'
+  private isPc: boolean = deviceInfo.deviceType === '2in1';
+  private settings: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      primaryTitle: $r('app.string.Setting_title'),
+      contentBuilder: () => { this.buildSettings(); }
+    }),
+    width: '80%'
+  });
 
-  aboutToAppear(): void {
-    // webview.WebviewController.setWebDebuggingAccess(true)
+  @Builder
+  private buildSettings() {
+    SettingsContent()
   }
 
   build() {
     Column() {
       if (this.isPc) {
-        PcIndex()
-      } else {
-        PhoneOrTablet()
+        Row() {
+          Image($r('app.media.startIcon')).width(20)
+          Text($r('app.string.EntryAbility_label')).fontColor(Color.White).margin({ left: 8 })
+          Blank()
+          Button({ buttonStyle: ButtonStyleMode.TEXTUAL }) {
+            Image($r('app.media.gearshape')).width(20)
+          }
+          .width(44)
+          .height(44)
+          .accessibilityText($r('app.string.menu_settings'))
+          .onClick(() => { this.settings.open(); })
+        }
+        .height(48)
+        .padding({ left: 16, right: 16 })
       }
+      WebTerminal({ virtKeyEnabled: !this.isPc }).layoutWeight(1)
     }
     .width('100%')
     .height('100%')

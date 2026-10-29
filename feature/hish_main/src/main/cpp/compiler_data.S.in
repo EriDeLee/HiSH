@@ -1,0 +1,9 @@
+.section .rodata.hish_compiler,"a",@progbits
+.global HiSHCompilerData
+.hidden HiSHCompilerData
+HiSHCompilerData:
+.incbin "@HISH_LINUX_PAYLOAD_DIR@/compiler-data.bin"
+.global HiSHCompilerDataEnd
+.hidden HiSHCompilerDataEnd
+HiSHCompilerDataEnd:
+.section .note.GNU-stack,"",@progbits
