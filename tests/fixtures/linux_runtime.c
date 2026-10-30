@@ -149,7 +149,7 @@ int main(int argc, char** argv)
         const char* image=getenv("HISH_EXECUTABLE");char link[4096]={0},at[4096]={0},raw[4096]={0};
         ssize_t n=readlink("/proc/self/exe",link,sizeof(link)-1);int directory=open("/proc/self",O_DIRECTORY|O_RDONLY|O_CLOEXEC);
         ssize_t m=directory<0?-1:readlinkat(directory,"exe",at,sizeof(at)-1);if(directory>=0)close(directory);
-        if(!image||n<0||m<0||strcmp(link,image)||strcmp(at,image))return 186;
+        if(!image||image[0]!='/'||n<0||m<0||strcmp(link,image)||strcmp(at,image))return 186;
         int fd=open("/proc/self/exe",O_RDONLY|O_CLOEXEC);struct stat a,b;
         if(fd<0||fstat(fd,&a)||stat(image,&b)||a.st_dev!=b.st_dev||a.st_ino!=b.st_ino)return 187;close(fd);
         syscall(SYS_readlinkat,AT_FDCWD,"/proc/self/exe",raw,sizeof(raw)-1);printf("PROCESS_KERNEL_EXECUTABLE=%s\n",raw);fflush(stdout);

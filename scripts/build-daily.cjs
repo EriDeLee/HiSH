@@ -8,6 +8,7 @@ const native=path.join(sdk,'sdk/default/openharmony/native');
 function run(executable,args,name){
  const fd=fs.openSync(path.join(output,name),'wx');try{const r=cp.spawnSync(executable,args,{cwd:repo,env,windowsHide:true,stdio:['ignore',fd,fd]});if(r.error)throw r.error;assert.equal(r.status,0,name+' failed');}finally{fs.closeSync(fd);}
 }
+run(process.execPath,[path.join(__dirname,'packages/prepare.cjs'),native],'package-bootstrap.log');
 run(process.execPath,[path.join(__dirname,'linux/build.cjs'),native],'runtime-build.log');
 for(const abi of ['arm64-v8a','x86_64']){
  const directory=path.join(repo,'feature/hish_main/.cxx/default/default/debug',abi);

@@ -9,6 +9,7 @@ int HiSHExecPackagedImage(const char* path,char* const argv[],unsigned runtime,c
 int HiSHRunPtraceFile(const char* path,char* const argv[],const char* executable,int diagnostic,int notify);
 int HiSHRunNativeCommand(char* const argv[]);
 const char* HiSHExecError(void);
+int HiSHNativeLibraryDirectory(char* buffer,unsigned capacity);
 void HiSHPrepareToolWrappers(void);
 void HiSHResetVirtualTerminal(void);
 int HiSHHasApplet(const char* name);

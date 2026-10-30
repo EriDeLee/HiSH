@@ -387,7 +387,8 @@ extern "C" __attribute__((visibility("default"))) void HiSHNativeMain(NativeChil
     HiSHPrepareToolWrappers();
     setenv("TERM", "xterm-256color", 1);
     const char* inheritedPath = getenv("PATH");
-    const std::string path = root + "/usr/bin:" + (inheritedPath ? inheritedPath : "/system/bin:/bin");
+    const std::string path = root + "/packages/root/usr/bin:" + root + "/packages/root/bin:" +
+        root + "/usr/bin:" + (inheritedPath ? inheritedPath : "/system/bin:/bin");
     setenv("PATH", path.c_str(), 1);
     setenv("PS1", "$ ", 1);
     if (chdir((root + "/home").c_str()) != 0) {

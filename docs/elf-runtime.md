@@ -14,6 +14,8 @@ Linux 调用方经 `exec_bridge.cpp`、`exec_bridge_shared.h` 将有界参数和
 
 `HISH_KERNEL_EXEC_BRIDGE=0` 是旧直接跳转对照，保留原映射，多线程时返回 ENOTSUP。默认桥也不等于完整 Linux exec；隐藏 libc、直接 syscall 和静态程序内部调用仍需独立验证。
 
+普通 ELF 文件上限为128MiB，映像上限仍为256MiB。逻辑镜像通过已打开文件的 procfs 描述符解析为绝对路径，覆盖 `./program` 调用；否则合作式 readlink 和 Bun 的 `process.execPath` 会退回引导 Toybox。原始 syscall 查询仍显示内核镜像。
+
 ## musl
 
 固定 musl 1.2.5 源码及 Alpine 补丁提供符号、重定位、TLS 和初始化。`linux/musl_dso_mapping.h` 为 DSO 独立预留空间，再装载真实段；不依赖旧二进制偏移、零填充注入或重叠 R/RX 头视图。

@@ -21,6 +21,14 @@ glibc 构建输入来自 Ubuntu ARM64 libc6/libc6-dev `2.39-0ubuntu8.9`；固定
 
 正式公开分发仍须完成对应源码、修改和许可交付审查；本地构建通过不等于发布合规认证。
 
+## 包管理器自举
+
+APK/libapk 3.0.8、OpenSSL 3.5.9、zlib 1.3.2、Alpine 公钥及 CA bundle 来自 Alpine v3.23 main/aarch64。固定 URL、SHA256 和所选文件见 `scripts/packages/bootstrap-lock.json`。未修改 APK 可执行文件或库字节；只将所需文件放入自举私有布局。GPL-2.0-only、libfetch BSD、Apache-2.0、Zlib、MPL-2.0 许可及源码入口随包 `licenses/packages.txt` 交付。
+
+普通 jq/zstd 及其依赖不在 HAP 中。手机安装时验证上游签名，保留原始 PKGINFO。具体行为见 [包管理器](packages.md)。
+
+PRoot 平台端口基于 `25dc6a3134891f98a79f57ce1c2c1b23ff15cad1`，GPL-2.0-or-later；按需安装的编译产物和探针位于自举。固定归档、uthash、talloc/构建头文件摘要见 `scripts/packages/proot-lock.json`，补丁逻辑及适配源文件见同目录构建脚本和 `proot/`。talloc 动态依赖由 Alpine 安装，未静态链接进端口。
+
 ## 备用但不交付
 
 mrsh 源码及 MIT 许可、原生探针和实验加载器保留。闲置 WebGL 插件位于 `third_party/xterm-optional/`；与 Git 原件在规范化换行后全文相同，原始摘要不同。

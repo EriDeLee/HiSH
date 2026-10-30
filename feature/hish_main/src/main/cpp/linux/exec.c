@@ -85,7 +85,7 @@ static int load(const char* path, Image* image,int preflight)
     if (image->fd < 0) return -1;
     struct stat info;
     if (fstat(image->fd, &info)) return -1;
-    if (!S_ISREG(info.st_mode) || info.st_size < (off_t)sizeof(Elf64_Ehdr) || info.st_size > 64 * 1024 * 1024) return error(ENOEXEC);
+    if (!S_ISREG(info.st_mode) || info.st_size < (off_t)sizeof(Elf64_Ehdr) || info.st_size > 128 * 1024 * 1024) return error(ENOEXEC);
     if (read_exact(image->fd, &image->eh, sizeof(image->eh), 0)) return -1;
     const Elf64_Ehdr* eh = &image->eh;
     if (memcmp(eh->e_ident, ELFMAG, SELFMAG) || eh->e_ident[EI_CLASS] != ELFCLASS64 || eh->e_ident[EI_DATA] != ELFDATA2LSB ||
@@ -332,7 +332,7 @@ static int routed(const char* path, char* const argv[], char* const envp[])
         HISH_NATIVE_TOOLS(ROUTE)
 #undef ROUTE
         // Explicit aliases only. Unknown commands keep their ordinary error.
-        const char* aliases[] = {"sh","mksh","cat","grep","sed","ls","head","tail","find","env","sort","cut","tr","od","wc","sleep","true","false","echo","printf","pwd","mkdir","rm","cp","mv","touch","vi","uname","chmod","cmp","dd","hish-tools",NULL};
+        const char* aliases[] = {"sh","mksh","cat","grep","sed","ls","head","tail","find","env","sort","cut","tr","od","wc","sleep","true","false","echo","printf","pwd","mkdir","rm","cp","mv","touch","vi","uname","chmod","cmp","dd","hish-tools","pkg",NULL};
         for (size_t i = 0; aliases[i]; i++) if (!strcmp(name, aliases[i])) {
             size_t argc = 0; while (argv[argc] && argc < MAX_ARGS - 2) argc++;
             if (argv[argc]) return error(E2BIG);
@@ -389,6 +389,8 @@ static int application_shell(const char* path)
 }
 int execve(const char* path, char* const argv[], char* const envp[])
 {
+    // PRoot owns translation and the kernel-exec handoff for its tracees.
+    const char* proot=getenv("HISH_PROOT_ACTIVE");if(proot&&!strcmp(proot,"1"))return syscall(SYS_execve,path,argv,envp);
     path=HishExecutablePath(path);
     // Even if another firmware permits /bin/sh, it must not silently replace
     // the selected application shell with the system shell.

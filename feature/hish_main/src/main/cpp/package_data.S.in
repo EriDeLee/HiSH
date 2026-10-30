@@ -1,0 +1,10 @@
+.section .rodata
+.balign 8
+.global HiSHPackageData
+.hidden HiSHPackageData
+HiSHPackageData:
+.incbin "@HISH_PACKAGE_BOOTSTRAP@"
+.global HiSHPackageDataEnd
+.hidden HiSHPackageDataEnd
+HiSHPackageDataEnd:
+.section .note.GNU-stack,"",%progbits

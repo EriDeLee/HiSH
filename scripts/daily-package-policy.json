@@ -37,7 +37,7 @@
     "product/phone/build/default/generated/r/default/ResourceTable.ts"
   ],
   "rawfiles": [
-    "licenses/mksh-COPYRIGHT.txt", "licenses/mksh-terms.txt", "pages/license.html",
+    "licenses/mksh-COPYRIGHT.txt", "licenses/mksh-terms.txt", "licenses/packages.txt", "pages/license.html",
     "term/appearance.js", "term/fonts.css", "term/fonts/LICENSE.txt",
     "term/fonts/fira-code-regular.woff2", "term/fonts/jetbrains-mono-regular.woff2",
     "term/fonts/source-code-pro-regular.woff2", "term/native-selection.js",

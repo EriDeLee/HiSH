@@ -5,10 +5,20 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
+#include <errno.h>
 static inline const char* HishImageName(const char* file,char* buffer,size_t capacity)
 {
-    ssize_t n=syscall(SYS_readlinkat,AT_FDCWD,file,buffer,capacity-1);
-    if(n>0&&(size_t)n<capacity&&buffer[0]=='/'){buffer[n]=0;return buffer;}
+    // Resolve regular relative paths as well as symlinks. Cooperative procfs
+    // readers require an absolute identity, even when invoked as ./program.
+    const int saved=errno;
+    const int fd=syscall(SYS_openat,AT_FDCWD,file,O_PATH|O_CLOEXEC,0);
+    if(fd>=0){
+        char descriptor[64];snprintf(descriptor,sizeof(descriptor),"/proc/self/fd/%d",fd);
+        ssize_t n=syscall(SYS_readlinkat,AT_FDCWD,descriptor,buffer,capacity-1);
+        syscall(SYS_close,fd);errno=saved;
+        if(n>0&&(size_t)n<capacity-1&&buffer[0]=='/'){buffer[n]=0;return buffer;}
+    }
+    errno=saved;
     return file;
 }
 // Logical image identity for cooperative libc calls. Raw procfs/syscalls still

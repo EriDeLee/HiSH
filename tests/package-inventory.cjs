@@ -3,7 +3,7 @@ const {inspectInventory,inspectSourceMaps,code}=require('../scripts/inspect-dail
 function inventory(){return policy.nativeBase.flatMap(name=>['libs/arm64-v8a/'+name,'libs/x86_64/'+name])
  .concat(policy.arm64Runtime.map(name=>'libs/arm64-v8a/'+name),policy.rawfiles.map(name=>'resources/rawfile/'+name),'ets/modules.abc','module.json');}
 test('daily inventory accepts the complete explicit delivery set',()=>{
-  assert.deepEqual(inspectInventory(inventory()),{nativeLibraryCount:14,rawfileCount:16,strictInventoryVerified:true});
+  assert.deepEqual(inspectInventory(inventory()),{nativeLibraryCount:14,rawfileCount:17,strictInventoryVerified:true});
 });
 for(const name of ['resources/rawfile/term/xterm-addon-webgl.js','resources/rawfile/term/README.md',
  'resources/rawfile/vm/efi-virtio.rom','resources/rawfile/guide/01_Linux_Shell.html',

@@ -225,12 +225,22 @@ int tcflush(int fd,int action)
 }
 int open(const char* path,int flags,...)
 {
+    // This app domain can create unnamed temporary inodes but cannot publish
+    // them with linkat(/proc/self/fd/N). Advertise the unsupported operation
+    // before creating one so upstream callers use their named-temp fallback.
+    if((flags&O_TMPFILE)==O_TMPFILE){errno=EOPNOTSUPP;return -1;}
     mode_t mode=0;if((flags&O_CREAT)||(flags&O_TMPFILE)==O_TMPFILE){va_list args;va_start(args,flags);mode=va_arg(args,int);va_end(args);}
     if(!strcmp(path,"/dev/tty")&&terminal()){
         const char* value=getenv("HISH_TTY_IO_FD");if(!value){errno=ENXIO;return -1;}const int fd=atoi(value);
         if(!is_terminal(fd)){errno=ENXIO;return -1;}return fcntl(fd,flags&O_CLOEXEC?F_DUPFD_CLOEXEC:F_DUPFD,3);
     }
     return syscall(SYS_openat,AT_FDCWD,HishExecutablePath(path),flags,mode);
+}
+int openat(int directory,const char* path,int flags,...)
+{
+    if((flags&O_TMPFILE)==O_TMPFILE){errno=EOPNOTSUPP;return -1;}
+    mode_t mode=0;if(flags&O_CREAT){va_list args;va_start(args,flags);mode=va_arg(args,int);va_end(args);}
+    return syscall(SYS_openat,directory,HishExecutablePath(path),flags,mode);
 }
 ssize_t readlinkat(int directory,const char* path,char* buffer,size_t size)
 {

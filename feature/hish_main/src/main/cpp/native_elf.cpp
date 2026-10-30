@@ -62,7 +62,7 @@ struct Image {
     bool Read(const std::string& file)
     {
         fd=open(file.c_str(),O_RDONLY|O_CLOEXEC);if(fd<0)return Fail("open ELF",errno);
-        struct stat st{};if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<sizeof(header)||st.st_size>64*1024*1024)return Fail("ELF file bounds",ENOEXEC);
+        struct stat st{};if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<sizeof(header)||st.st_size>128*1024*1024)return Fail("ELF file bounds",ENOEXEC);
         bytes.resize(st.st_size);size_t at=0;
         while(at<bytes.size()){const auto n=pread(fd,bytes.data()+at,bytes.size()-at,at);if(n<0&&errno==EINTR)continue;if(n<=0)return Fail("read ELF",n<0?errno:ENOEXEC);at+=n;}
         memcpy(&header,bytes.data(),sizeof(header));
@@ -229,6 +229,10 @@ int Execute(const std::string& path,char* const argv[],Runtime runtime,const cha
 }
 }
 extern "C" const char* HiSHExecError(){return failure.c_str();}
+extern "C" int HiSHNativeLibraryDirectory(char* buffer,unsigned capacity)
+{
+    const auto dir=LibraryDir();if(dir.empty()){errno=ENOENT;return -1;}if(!buffer||dir.size()>=capacity){errno=ENAMETOOLONG;return -1;}memcpy(buffer,dir.c_str(),dir.size()+1);return 0;
+}
 #ifdef HISH_ENABLE_DIAGNOSTICS
 extern "C" int HiSHRunPtraceFile(const char* path,char* const argv[],const char* executable,int diagnostic,int notify)
 {
@@ -241,9 +245,10 @@ extern "C" int HiSHExecPackagedImage(const char* path,char* const argv[],unsigne
     if(runtime>=std::size(hints)){Fail("bridge runtime",EINVAL);return -1;}
     try{return Execute(path,argv,hints[runtime],executable);}catch(...){Fail("bridge image allocation",ENOMEM);return -1;}
 }
+extern "C" int HiSHPackageMain(char* const argv[]);
 extern "C" int HiSHHasNativeCommand(const char* name)
 {
-    if(!name)return 0;if(!strcmp(name,"hish-tools"))return 1;
+    if(!name)return 0;if(!strcmp(name,"hish-tools")||!strcmp(name,"pkg"))return 1;
     if(HishDisabledTool(name))return 1;
 #ifdef HISH_ENABLE_DIAGNOSTICS
     if(!strcmp(name,"hish-run"))return 1;
@@ -253,6 +258,7 @@ extern "C" int HiSHHasNativeCommand(const char* name)
 extern "C" int HiSHRunNativeCommand(char* const argv[])
 {
     failure.clear();
+    if(!strcmp(argv[0],"pkg"))return HiSHPackageMain(argv);
     if(HishDisabledTool(argv[0])){Fail("diagnostic command is not included in this build",ENOTSUP);return -1;}
 #ifdef HISH_ENABLE_DIAGNOSTICS
     if(!strcmp(argv[0],"hish-run")){
@@ -266,7 +272,7 @@ extern "C" int HiSHRunNativeCommand(char* const argv[])
 #endif
     if(!strcmp(argv[0],"hish-tools")){
         if(argv[1]&&!strcmp(argv[1],"--path")&&argv[2]){const auto* tool=Lookup(argv[2]);if(!tool||!HiSHHasNativeCommand(tool->name)){errno=ENOENT;failure="tool unavailable";return -1;}puts((LibraryDir()+"/"+tool->file).c_str());return 0;}
-        puts("HiSH base: mksh, sh and built-in/system utilities.\nUse command -v NAME or whence NAME for command lookup.\nApplication packages are not bundled; package management is not implemented yet.");
+        puts("HiSH base: mksh, sh and built-in/system utilities.\nUse command -v NAME or whence NAME for command lookup.\nUse pkg help for signed Alpine packages and the qualified application catalog.");
 #ifdef HISH_ENABLE_DIAGNOSTICS
         puts("Diagnostics enabled; experimental command: hish-run");
 #endif
@@ -381,7 +387,7 @@ extern "C" void HiSHPrepareToolWrappers()
         if(fd>=0){const bool good=write(fd,script.data(),script.size())==static_cast<ssize_t>(script.size());close(fd);if(!good)unlink(file.c_str());}
     }
 #endif
-    std::set<std::string> names{"sh","mksh","hish-tools","cat","grep","sed","ls","mkdir","sleep","printf","test","["};
+    std::set<std::string> names{"sh","mksh","hish-tools","pkg","cat","grep","sed","ls","mkdir","sleep","printf","test","["};
     for(const auto& tool:tools)if(tool.name&&HiSHHasNativeCommand(tool.name))names.insert(tool.name);
     std::istringstream system(std::string(HiSHSystemApplets())+" "+HiSHBuiltinApplets());std::string item;
     while(system>>item){const auto slash=item.find_last_of('/');names.insert(item.substr(slash==std::string::npos?0:slash+1));}

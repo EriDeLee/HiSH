@@ -7,12 +7,14 @@
 #include <fcntl.h>
 #include <unistd.h>
 extern char** environ;
+extern "C" [[noreturn]] void HiSHEnterPRootImage(const char*);
 __attribute__((noreturn)) static void InvalidRequest(const char* stage)
 {
     dprintf(2,"HiSH exec bridge request: %s errno=%d\n",stage,errno);_exit(126);
 }
 __attribute__((constructor)) static void EnterRequestedImage()
 {
+    if(const char* script=getenv("HISH_PROOT_SCRIPT"))HiSHEnterPRootImage(script);
     const char* value=getenv("HISH_EXEC_BRIDGE_FD");if(!value)return;
     const bool diagnostic=getenv("HISH_SPAWN_DIAGNOSTICS")!=nullptr;
     if(diagnostic)dprintf(2,"EXEC_BOOTSTRAP_ENTER\n");

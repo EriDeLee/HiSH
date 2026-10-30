@@ -5,7 +5,7 @@
 从仓库根执行；测试使用已有 SDK 和缓存，在 `.test` 写隔离输出，不安装工具：
 
 ```cmd
-node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs
+node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs
 node tests/native-session.cjs
 node tests/terminal-codec.cjs
 git diff --check
@@ -31,4 +31,4 @@ SDK 的 `ets/sourceMaps.map` 只允许该位置，禁止 sourcesContent，来源
 
 签名、覆盖安装和设备测试另行授权。HDC 仅传文件、驱动输入、读取取证；每次注入先确认新鲜电源、焦点及终端页面。复杂命令通过文件送入后在可见终端执行。
 
-本轮移出了编译器和应用，不能直接重跑旧全工具链脚本或借旧结果声称新包有这些功能。底座应检查 shell、基础工具、脚本、环境、管道、输入、作业和关闭回收；独立软件及未来包管理器属于各自阶段。状态见 [验收](verification.md)。
+底座应检查 shell、基础工具、脚本、环境、管道、输入、作业和关闭回收；pkg 另外检查真实下载验签、普通命令执行、升级/卸载/重装、网络失败保留原安装、坏签名/未知公钥拒绝及重启应用。不能借旧全工具链结果声称新包提供了 Git/编译器。状态见 [验收](verification.md)。

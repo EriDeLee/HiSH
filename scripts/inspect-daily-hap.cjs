@@ -71,6 +71,12 @@ function code(bytes){
 function inspect(file,payloads){
   const hap=entries(file),names=hap.names.filter(name=>name.startsWith('libs/'));
   const inventory=inspectInventory(hap.names);
+  const packageRoot=require('node:path').resolve(__dirname,'../.test/packages');
+  const bootstrap=JSON.parse(fs.readFileSync(require('node:path').join(packageRoot,'provenance.json'),'utf8'));
+  const packageBytes=fs.readFileSync(require('node:path').join(packageRoot,bootstrap.sha256+'.gz'));
+  assert.equal(hash(packageBytes),bootstrap.sha256,'Changed package bootstrap');
+  assert(hap.read('libs/arm64-v8a/libhish_shell.so').includes(packageBytes),'Selected signed-package bootstrap is missing or stale');
+  const platformPRootPortIncluded=bootstrap.files.some(item=>item.name==='sbin/proot-hish');
   const excluded=names.filter(name=>/libhish_(probe|bench|mksh_trial)|libhish_linux_(busybox|dash|.*check|musl_dynamic|musl_static|glibc_dynamic|glibc_static|glibc_static_compat|fs_identity|glibc_libc|glibc_padded|glibc_separate|identity|hishbench.*)\.so$/.test(name));
  assert.deepEqual(excluded,[],'Diagnostic/intermediate libraries leaked into daily HAP');
   const runtime=[];for(const name of policy.arm64Runtime){
@@ -102,7 +108,7 @@ function inspect(file,payloads){
   for(const name of ['mksh-COPYRIGHT.txt','mksh-terms.txt'])assert(hap.names.includes('resources/rawfile/licenses/'+name),'mksh license missing');
   return {dailyPackageVerified:true,bytes:fs.statSync(file).size,sha256:hash(fs.readFileSync(file)),nativeLibraries:names,runtime,...inventory,...sourceMaps,
     runtimeCodeIgnoredHeaderFields:['e_shoff','e_shnum','e_shstrndx'],
-    diagnosticsExcluded:true,diagnosticArktsExcluded:true,ordinaryApplicationsExcluded:true,compilerDataExcluded:true,applicationEnvironmentInstallersExcluded:true,originalDownloadFixtureExcluded:true,unusedWebglNotLoaded:true,unusedWebglExcluded:true,developmentDocsExcluded:true,defaultShell:'mksh',otherShellComponentsExcluded:true};
+    diagnosticsExcluded:true,diagnosticArktsExcluded:true,ordinaryApplicationsExcluded:!platformPRootPortIncluded,platformPRootPortIncluded,retiredBundledApplicationsExcluded:true,compilerDataExcluded:true,retiredEnvironmentInstallersExcluded:true,originalDownloadFixtureExcluded:true,unusedWebglNotLoaded:true,unusedWebglExcluded:true,developmentDocsExcluded:true,defaultShell:'mksh',otherShellComponentsExcluded:true};
 }
 module.exports={entries,code,inspectInventory,inspectSourceMaps,inspect,compareSigned};
 if(require.main===module)console.log(JSON.stringify(inspect(process.argv[2],process.argv[3]),null,2));

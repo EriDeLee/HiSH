@@ -118,7 +118,20 @@ string(REPLACE "USE_SH(OLDTOY(toysh" "USE_TEST(NEWTOY(test, 0, TOYFLAG_USR|TOYFL
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/newtoys.h" "${TOYBOX_TABLE}")
 file(GLOB TOYBOX_SOURCES "${TOYBOX}/lib/*.c" "${TOYBOX}/toys/*/*.c")
-add_library(hish_shell SHARED shell_module.c mksh_adapter.c toybox_applets.c native_elf.cpp "${TOYBOX}/main.c" ${TOYBOX_SOURCES})
+add_library(hish_shell SHARED shell_module.c mksh_adapter.c toybox_applets.c native_elf.cpp package_manager.cpp proot_loader.cpp "${TOYBOX}/main.c" ${TOYBOX_SOURCES})
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/packages/bootstrap.cmake")
+    target_include_directories(hish_shell PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/packages")
+    file(SHA256 "${HISH_PACKAGE_BOOTSTRAP}" HISH_PACKAGE_ACTUAL_HASH)
+    if(NOT HISH_PACKAGE_ACTUAL_HASH STREQUAL HISH_PACKAGE_BOOTSTRAP_SHA256)
+        message(FATAL_ERROR "Package bootstrap changed; run node scripts/packages/prepare.cjs")
+    endif()
+    configure_file(package_data.S.in "${CMAKE_CURRENT_BINARY_DIR}/package_data.S" @ONLY)
+    target_sources(hish_shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/package_data.S")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/package_data.S" PROPERTIES OBJECT_DEPENDS "${HISH_PACKAGE_BOOTSTRAP}")
+    target_compile_definitions(hish_shell PRIVATE HISH_PACKAGE_BOOTSTRAP_SHA256="${HISH_PACKAGE_BOOTSTRAP_SHA256}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HISH_PACKAGE_BOOTSTRAP}" "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/packages/bootstrap.cmake")
+endif()
 include(mksh_platform.cmake)
 set(MKSH_FILES edit.c eval.c exec.c expr.c funcs.c histrap.c jobs.c lalloc.c lex.c main.c misc.c shf.c strlcpy.c syn.c tree.c var.c)
 list(TRANSFORM MKSH_FILES PREPEND "${MKSH}/")
@@ -142,7 +155,7 @@ target_compile_definitions(hish_ohos_tty PRIVATE
     HISH_OHOS_TTY=1
     isatty=HiSHTtyIsatty tcgetattr=HiSHTtyGetAttr tcsetattr=HiSHTtySetAttr
     tcgetpgrp=HiSHTtyGetPgrp tcsetpgrp=HiSHTtySetPgrp tcgetsid=HiSHTtyGetSid
-    tcdrain=HiSHTtyDrain tcflush=HiSHTtyFlush open=HiSHTtyOpen ioctl=HiSHTtyIoctl
+    tcdrain=HiSHTtyDrain tcflush=HiSHTtyFlush open=HiSHTtyOpen openat=HiSHTtyOpenAt ioctl=HiSHTtyIoctl
     read=HiSHTtyRead readv=HiSHTtyReadv write=HiSHTtyWrite
     readlink=HiSHTtyReadlink readlinkat=HiSHTtyReadlinkat)
 target_sources(hish_shell PRIVATE $<TARGET_OBJECTS:hish_ohos_tty>)

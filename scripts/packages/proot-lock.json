@@ -1,0 +1,11 @@
+{
+  "version": "5.5.0-hish.1",
+  "commit": "25dc6a3134891f98a79f57ce1c2c1b23ff15cad1",
+  "sources": [
+    {"file":"proot.tar.gz","url":"https://codeload.github.com/proot-me/proot/tar.gz/25dc6a3134891f98a79f57ce1c2c1b23ff15cad1","sha256":"6adb0d808dad47d66f503d6d5a699b455ac1a0a519b905378be4ffc0af92f40e","prefix":"proot-25dc6a3134891f98a79f57ce1c2c1b23ff15cad1/","directory":"source"},
+    {"file":"uthash.tar.gz","url":"https://codeload.github.com/proot-me/uthash/tar.gz/e493aa90a2833b4655927598f169c31cfcdf7861","sha256":"2ddb6665e82ffd7e87a27b97081bddf8f09520b7a2cfd6ab011541e7cde991fa","prefix":"uthash-e493aa90a2833b4655927598f169c31cfcdf7861/","directory":"uthash"},
+    {"file":"talloc-dev-2.4.3-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/talloc-dev-2.4.3-r0.apk","sha256":"94c8c448007602a705fdb30b520d10e2a98d9d4a9b471ad58fbd09aeb59d0dea","prefix":"usr/","directory":"sysroot/usr"},
+    {"file":"talloc-2.4.3-r0.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/talloc-2.4.3-r0.apk","sha256":"d0b26f50d0f3b7dd49ac2bc7b1b301a7b058384e41a079baaa736ccf2d685dc7","prefix":"usr/","directory":"sysroot/usr"},
+    {"file":"bsd-compat-headers-0.7.2-r6.apk","url":"https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/bsd-compat-headers-0.7.2-r6.apk","sha256":"ebba117348b400287be20b3a2a93ea31536455d0dcfb70fe3ff7d57673c691f1","prefix":"usr/","directory":"sysroot/usr"}
+  ]
+}
