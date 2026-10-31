@@ -30,16 +30,33 @@ async function prepare(sdk){
  const built=cp.spawnSync(clang,['--target=aarch64-linux-musl','--sysroot='+musl,'-fuse-ld=lld','-nostdlib','-Os','-fPIE','-pie','-fno-emulated-tls','-fno-stack-protector','-mno-outline-atomics','-Wl,-z,max-page-size=4096','-Wl,--export-dynamic','-Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1',path.join(lib,'Scrt1.o'),path.join(lib,'crti.o'),path.join(__dirname,'fetch.c'),'-I'+path.join(musl,'usr/include'),'-L'+link,'-Wl,--no-as-needed','-l:libapk.so.3.0.0','-l:libssl.so.3','-l:libcrypto.so.3',path.join(musl,'lib/libc.musl-aarch64.so.1'),path.join(native,'llvm/lib/clang/15.0.4/lib/aarch64-linux-ohos/libclang_rt.builtins.a'),path.join(lib,'crtn.o'),'-o',helper],{encoding:'utf8',windowsHide:true});assert.equal(built.status,0,built.stdout+built.stderr);
  records.push({name:'sbin/fetch-helper',bytes:fs.readFileSync(helper),mode:0o700});
  const proot=await require('./proot-build.cjs').buildPRoot(native,archive);
- records.push({name:'sbin/proot-hish',bytes:fs.readFileSync(proot.program.file),mode:0o700},{name:'sbin/proot-probe',bytes:fs.readFileSync(proot.probe.file),mode:0o700});
- records.push({name:'etc/hish/proot-provenance.json',bytes:Buffer.from(JSON.stringify({version:proot.version,commit:proot.commit,sources:proot.sources,sha256:proot.program.sha256,fingerprint:proot.fingerprint})),mode:0o600});
- const upstream=require('./upstream.json');records.push({name:'etc/hish/upstream.json',bytes:Buffer.from(JSON.stringify(upstream)),mode:0o600});
- fs.writeFileSync(path.join(output,'package_upstream.h'),'#pragma once\nnamespace HishUpstream {\n'+Object.entries({Bun:upstream.bun,Proot:{version:proot.version,commit:proot.commit}}).flatMap(([name,values])=>Object.entries(values).map(([k,v])=>'inline constexpr const char* '+name+'_'+k+' = '+JSON.stringify(v)+';')).join('\n')+'\n}\n');
+ const manifest=localManifest(proot);
+ for(const item of manifest.payloads)records.push(item);
+ const text=JSON.stringify(manifest.data,null,1)+'\n';
+ records.push({name:'etc/hish/packages.json',bytes:Buffer.from(text),mode:0o600});
+ fs.writeFileSync(path.join(output,'package_upstream.h'),'#pragma once\nnamespace HishUpstream {\ninline constexpr const char* Manifest_sha256 = '+JSON.stringify(hash(Buffer.from(text)))+';\n}\n');
  const chunks=[Buffer.from('HISHPKG1')];for(const r of records){assert(/^[a-zA-Z0-9@._/+-]+$/.test(r.name)&&!r.name.split('/').includes('..'));const n=Buffer.from(r.name),h=Buffer.alloc(12);h.writeUInt32LE(n.length);h.writeUInt32LE(r.bytes.length,4);h.writeUInt32LE(r.mode,8);chunks.push(h,n,r.bytes);}
  const blob=zlib.gzipSync(Buffer.concat(chunks),{level:9}),digest=hash(blob),dest=path.join(output,digest+'.gz');
  if(!fs.existsSync(dest))fs.writeFileSync(dest,blob);
  fs.writeFileSync(path.join(output,'bootstrap.cmake'),'set(HISH_PACKAGE_BOOTSTRAP [=['+dest.replace(/\\/g,'/')+']=])\nset(HISH_PACKAGE_BOOTSTRAP_SHA256 '+digest+')\n');
  fs.writeFileSync(path.join(output,'provenance.json'),JSON.stringify({repository:lock.repository,architecture:lock.architecture,sha256:digest,bytes:blob.length,packages:lock.packages,files:records.map(r=>({name:r.name,bytes:r.bytes.length,sha256:hash(r.bytes)}))},null,2)+'\n');
  return {dest,sha256:digest,bytes:blob.length};
+}
+// Package manifest (format 1) generated from the actual payload bytes. Local
+// entries are app-managed; remote sources and functional checks are data.
+function localManifest(proot){
+ const payloads=[],file=(name,bytes,mode)=>{payloads.push({name:'local/'+name,bytes,mode});return {payload:name,sha256:hash(bytes)};};
+ const tallocSource=proot.sources.find(s=>s.file.startsWith('talloc-')&&!s.file.startsWith('talloc-dev'));assert(tallocSource,'PRoot lock lacks the talloc runtime package');
+ const tallocBytes=fs.readFileSync(path.join(repo,'.test/packages/proot',tallocSource.file));assert.equal(hash(tallocBytes),tallocSource.sha256,'talloc package checksum');
+ const info=archive(tallocBytes).get('.PKGINFO').toString('utf8'),value=k=>info.split('\n').filter(l=>l.startsWith(k+' = ')).map(l=>l.slice(k.length+3));
+ assert.deepEqual(value('pkgname'),['talloc']);
+ const talloc={name:'talloc',version:value('pkgver')[0],kind:'apk',description:'talloc memory allocator (runtime dependency of the PRoot port)',
+  origin:'Alpine v3.23 main/aarch64 '+tallocSource.file+', unmodified and signed by Alpine; '+tallocSource.url,provides:value('provides'),...file(tallocSource.file,tallocBytes,0o600)};
+ const program=file('proot-hish',fs.readFileSync(proot.program.file),0o700),probe=file('proot-probe',fs.readFileSync(proot.probe.file),0o700);
+ const prootEntry={name:'proot',version:proot.version,kind:'files',description:'PRoot user-space chroot/bind tool, HiSH platform source port (no kernel root, not a sandbox)',
+  origin:'proot-me/proot '+proot.commit+' (GPL-2.0-or-later) with HiSH platform patches from scripts/packages/proot-build.cjs and scripts/packages/proot/; build fingerprint '+proot.fingerprint,
+  depends:['talloc'],files:[{path:'usr/bin/proot',...program,mode:448},{path:'usr/libexec/hish/proot-probe',...probe,mode:448}]};
+ return {payloads,data:{format:1,local:[prootEntry,talloc],remote:require('./sources.json').remote,checks:require('./checks.json')}};
 }
 if(require.main===module)prepare(process.argv[2]).then(x=>console.log(JSON.stringify(x))).catch(e=>{console.error(e);process.exitCode=1;});
 function verifiedArchive(bytes,pkg){assert.equal(hash(bytes),pkg.sha256,pkg.file+' checksum');return archive(bytes);}

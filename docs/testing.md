@@ -5,7 +5,7 @@
 从仓库根执行；测试使用已有 SDK 和缓存，在 `.test` 写隔离输出，不安装工具：
 
 ```cmd
-node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs
+node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs tests/package-core.cjs
 node tests/native-session.cjs
 node tests/terminal-codec.cjs
 git diff --check

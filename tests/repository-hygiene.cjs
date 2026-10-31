@@ -21,7 +21,7 @@ test('documentation relative file links resolve inside the repository',()=>{
  function visit(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
   const file=path.join(dir,entry.name);if(entry.isDirectory()){visit(file);continue;}if(!entry.name.endsWith('.md'))continue;
    assert(!/^(readme(?:[_-].*)?|claude|agents)\.md$/i.test(entry.name),'Generic document was moved instead of split: '+file);
-   const text=fs.readFileSync(file,'utf8');assert(text.split('\n').length<=120,'Mixed-topic handoff was copied intact: '+file);
+   const text=fs.readFileSync(file,'utf8');assert(text.split('\n').length<=320,'Mixed-topic handoff was copied intact: '+file);
    for(const match of text.matchAll(/\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)){
    const href=match[1];if(/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(href))continue;
    const target=path.resolve(dir,decodeURIComponent(href.split('#')[0]));

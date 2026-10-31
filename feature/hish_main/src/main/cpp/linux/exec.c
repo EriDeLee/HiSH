@@ -7,6 +7,7 @@
 #include "elf_code_mapping.h"
 #include "elf_execution_access.h"
 #include "linux_library_path.h"
+#include "elf_abi.h"
 #include <dirent.h>
 #include <elf.h>
 #include <errno.h>
@@ -230,7 +231,8 @@ static int run_image(const char* file, char* const argv[], char* const envp[], e
     enum Runtime runtime = Static;
     char interpreter[PATH_MAX], preload[PATH_MAX * 3], library_path[HISH_LIBRARY_PATH_LIMIT + 16], library_dir[PATH_MAX + 32];
     if (*main->interpreter) {
-        runtime = hint == Automatic ? (strstr(main->interpreter, "ld-musl-aarch64") ? Musl : strstr(main->interpreter, "ld-linux-aarch64") ? Glibc : Automatic) : hint;
+        const enum HishElfAbi abi = HishInterpreterAbi(main->interpreter);
+        runtime = hint == Automatic ? (abi == HishAbiMusl ? Musl : abi == HishAbiGlibc ? Glibc : Automatic) : hint;
         if (runtime == Automatic || runtime == Static) { errno = ENOEXEC; goto done; }
         if (runtime == Ohos) snprintf(interpreter, sizeof(interpreter), "/lib/ld-musl-aarch64.so.1");
         else snprintf(interpreter, sizeof(interpreter), "%s/%s", libraries, runtime == Musl ? "libhish_linux_musl_loader.so" : "libhish_linux_glibc_loader.so");

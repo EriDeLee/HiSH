@@ -18,6 +18,8 @@ void HiSHInitializeApplets(void);
 const char* HiSHSystemApplets(void);
 const char* HiSHBuiltinApplets(void);
 int HiSHExecNativeApplet(char* const argv[]);
+// Terminal session start: package migration plus the active generation path.
+int HiSHPackageSession(char* buffer,unsigned capacity);
 #ifdef __cplusplus
 }
 #endif

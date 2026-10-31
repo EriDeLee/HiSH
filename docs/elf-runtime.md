@@ -20,7 +20,9 @@ Linux 调用方经 `exec_bridge.cpp`、`exec_bridge_shared.h` 将有界参数和
 
 固定 musl 1.2.5 源码及 Alpine 补丁提供符号、重定位、TLS 和初始化。`linux/musl_dso_mapping.h` 为 DSO 独立预留空间，再装载真实段；不依赖旧二进制偏移、零填充注入或重叠 R/RX 头视图。
 
-库搜索由 `linux_library_path.h` 共用：随包运行库优先，显式应用私有绝对目录其次，`native/usr/lib/musl` 最后。realpath 后拒绝相对、空项及 native 根之外的目录；列表上限 32768 字节。此规则不是对同 UID 任意原生代码的隔离承诺。
+解释器的 ABI 由 `elf_abi.h` 统一判断，两个装载入口共用。只有标准名 `ld-musl-aarch64.so.1` 和 `ld-linux-aarch64.so.1` 才选择对应 libc；其他解释器报 `unsupported ELF interpreter/ABI (路径)`，不按子串猜测。没有 PT_INTERP 的静态程序走静态路径，这不代表其直接系统调用都已兼容。
+
+库搜索由 `linux_library_path.h` 共用：随包运行库优先，显式应用私有绝对目录其次，然后是本进程 `HISH_PACKAGE_ROOT` 代次的 `usr/lib`、`lib`，`native/usr/lib/musl` 最后。realpath 后拒绝相对、空项及 native 根之外的目录；列表上限 32768 字节。此规则不是对同 UID 任意原生代码的隔离承诺。
 
 当前 DSO 路径限制包括 4KiB 页、64MiB 文件、256MiB 映像、16MiB 对齐，不接受 W+X、代码 BSS、TEXTREL、可执行栈或重叠段页。
 

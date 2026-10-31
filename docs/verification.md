@@ -1,18 +1,17 @@
 # 验收状态
 
-更新：2026-10-30。包内容、源码状态和手机状态分别记录。
+更新：2026-10-31。包内容、源码状态和手机状态分别记录。
 
-## 当前：开放仓库与 PRoot 平台端口
+## 当前：代次化包管理器重构（2026-10-31）
 
-- `pkg` 已移除包名及依赖白名单，搜索、更新查询 Alpine v3.23 main+community/aarch64 官方索引；实际 update 显示27,442个可用包，不代表全部运行功能都已验证。
-- `pkg install bun proot` 已接通。Bun 1.4.4 使用官方 npm 归档与 SHA512；libstdc++ 由 APK 自动解析。PRoot 5.5.0-hish.1 是固定上游源码的显式平台端口，含 talloc 动态依赖，不冒充原版 APK。
-- 真机完整生命周期通过：升级、移除和重装、Bun 单独保留时的依赖、默认 npm 安装及导入、bunx；tree、bc、dash 的真实功能通过，无内置探针不会阻止安装。包目录 PATH 优先于旧转发脚本。
-- PRoot 通过 musl rootfs 文件读取/中文写入、shell、fork/exec；标准 `-0` 选项下静态 BusyBox 读取通过。Bun 在 rootfs 内运行、自启动子进程及相对路径 `./bun` 通过。PRoot 不授予内核 root，默认仍是直接执行的 mksh 会话。
-- 最终包为 work/pkg-open-build-8、pkg-open-device-8；签名 HAP 11,234,887字节，SHA256 `6a8e0e571dc87aa63da0ad69ad85ffef7ea623270b973035d8b82e6c88ad2916`。覆盖安装及 force-stop/start 后复测通过；软件、world及版本记录跨覆盖安装与重启摘要一致，原15份用户测试文件保留。
-- 主机69项 node:test、27项会话、3项编码通过，diff检查通过。非法参数、不存在包及网络失败均保留原安装；安装与功能检查分开报告。根目录不提交或暂存代码。
-- 证据在当前任务 work/pkg-open-proof、pkg-lifecycle-final-2.log、pkg-final-complete-1.log、pkg-restart-complete-1.log；交付副本在 outputs/hish-package-manager-v2。源码/许可和限制见 [包管理](packages.md)。
+- 包管理器改为不可变代次：`native/packages/generations/gNNNNNN`，`active` 指针原子切换；会话固定自己的代次与 PATH，运行中的程序不受后续安装影响。
+- 真机完整生命周期通过（`REFACTOR_LIFECYCLE_EXIT=0`，`REFACTOR_LIFECYCLE_PASS`）：旧布局导入、`pkg doctor`/`info`、`pkg upgrade` 保留应用自带包、离线 `remove proot` 后重装字节一致、`talloc` 守卫、`bash` 安装脚本记录为未运行并标记 `unconfigured`、`bash`/`tree` 实跑、代次保留与回收、`nginx` 目录符号链接拒绝且不激活、并发锁、registry 更新查询、不存在的包与非法路径拒绝、`pkg doctor --functional --capabilities` 中 proot 与 bun 功能探针通过。
+- 修复一个数据丢失级缺陷：仓库失败时旧实现会发布一个更小的代次并返回成功，导致已安装的 Alpine 包消失。现在请求的包既未下载也未安装时整个事务失败，不再发布；主机新增回归测试。真机复测：不存在的包返回非零，已装包一个不少。
+- 真机遇到设备侧匿名可执行内存拒绝（`mprotect` 返回 `EINVAL`），与本次重构无关：重构前 HAP 同样失败；授予 `ALLOW_WRITABLE_CODE_MEMORY` 等 ACL 后仍失败；重启无效；下午设备自行恢复后同一份代码全部通过。签名文件页仍可执行，应用目录文件、memfd、共享别名均返回 `EACCES`。
+- 最终包为 `build-6`，签名 HAP 11,511,584 字节，SHA256 `897961d1ac7fabf2d3180a9d07b3d91d5e8aec92afe73b70dbd76d743e22c7c4`。证据在 `hish-pkg-refactor/build-6`、`device-14`。
+- 主机 103 项 node:test 通过（含新增的失败事务回归测试），`git diff --check` 通过。
 
-完整 glibc 发行版、任意静态程序、目录链接、APK安装脚本/服务、非gzip APK格式、其他设备及发布域没有由本轮证明。下面记录均为旧包历史，不能替代上述结果。
+未由本轮证明：全新安装、覆盖安装后的 HAP 升级迁移、其他设备或固件、发布域签名、长期运行压力。
 
 ## 前轮验证：包管理与 Bun / PRoot（历史）
 

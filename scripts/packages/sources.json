@@ -1,0 +1,15 @@
+{
+  "remote": [
+    {
+      "name": "bun",
+      "kind": "npm",
+      "description": "Bun JavaScript runtime, official unmodified linux-aarch64-musl build",
+      "registry": "https://registry.npmjs.org",
+      "package": "@oven/bun-linux-aarch64-musl",
+      "member": "package/bin/bun",
+      "install": "usr/bin/bun",
+      "alpineDependencies": ["libstdc++"],
+      "extra": [{"path": "usr/bin/bunx", "content": "#!/bin/sh\nexec bun x \"$@\"\n", "mode": 448}]
+    }
+  ]
+}

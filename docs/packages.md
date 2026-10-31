@@ -1,57 +1,62 @@
 # 内置包管理器
 
-## 分发方案
+## 来源
 
-`pkg` 接入 Alpine v3.23 官方 `main`、`community` 的 aarch64 仓库，复用未修改的 APK/libapk 3.0.8 解析依赖、下载并验签。没有包名或依赖白名单：有效仓库包名均可请求，搜索查询上游索引。
+`pkg` 有三类来源，统一由 `native/packages/bootstrap-摘要/etc/hish/packages.json` 描述。该清单由构建从实际载荷生成，其 SHA256 编进 `libhish_shell.so`：
 
-Bun 使用官方 npm 的 `@oven/bun-linux-aarch64-musl`；版本、URL 和 SHA512 固定在 `scripts/packages/upstream.json`。PRoot 使用固定上游源码的 HiSH 平台端口，见 `scripts/packages/proot-lock.json`、`proot-build.cjs` 及 `proot/`。它是可复现的源码适配构建，不是声称原版 Alpine PRoot 可直接运行。两者的固定版本由 HAP 更新，`pkg info` 显示来源和版本。
+- **Alpine 仓库：** v3.23 官方 `main`、`community` 的 aarch64 仓库，复用未修改的 APK/libapk 3.0.8 下载并验签。没有包名或依赖白名单。
+- **应用管理的本地包：** 随 HAP 附送，当前为 PRoot 平台端口和 Alpine 原版 talloc 2.4.3-r0。可离线安装；`pkg` 不能把它们更新或替换成远程版本，只随应用更新变化。
+- **远程注册表来源：** 当前只有 Bun，取自 npm 官方 `@oven/bun-linux-aarch64-musl`。版本跟随注册表 latest，tarball 必须位于配置的注册表下，并按元数据中的 SHA-512 校验。该摘要与载荷来自同一份未独立签名的元数据，只证明二者一致。
 
-原版 `apk add --usermode` 在此设备上会因软链接创建及 O_TMPFILE 发布失败而中止。管理器调用 APK 的 fetch/verify/search/policy/update，由应用安装器写入私有目录；兼容层让 O_TMPFILE 提前返回 EOPNOTSUPP，使用上游命名临时文件回退。
+核心代码不按包名分支。本地包、远程来源和功能探针都是清单里的数据，源文件分别为 `scripts/packages/prepare.cjs`、`sources.json` 和 `checks.json`。
 
 ## 使用
 
 ```sh
 pkg search tree
 pkg update
-pkg info bun proot
-pkg install tree jq zstd bun proot
-tree .
-bun -e 'console.log(6*7)'
-proot -r /absolute/path/to/rootfs -w / /bin/sh
-pkg doctor
+pkg info bun proot talloc
+pkg install tree jq bun proot
 pkg list
 pkg upgrade
 pkg remove tree
+pkg doctor
+pkg doctor --functional --capabilities
 ```
 
-安装资格和兼容验证分开：安装成功代表依赖解析、来源验证和解包完成，不等于应用所有功能均可用。`doctor` 对 jq、zstd、Bun、PRoot 执行内置功能探针，其余包明确显示没有内置探针，不阻止安装。版本输出不代替功能断言。
+- `pkg list` 显示版本、来源（app-managed / alpine / npm）、配置状态，以及是否只作为依赖安装、链接是否存为副本。
+- `pkg doctor` 只报告状态：当前代次、清单是否已接受、逐文件改动或缺失、未运行的安装脚本。`--functional` 才执行清单中的功能探针；`--capabilities` 才运行符号链接、硬链接、ptrace 和 seccomp 用户通知探针。
+- 安装成功与功能验证分开报告；没有探针的包显示为未验证，不阻止安装。
 
-`upgrade` 对整个请求集合重新解析 Alpine 最新版本。Bun/PRoot 重新安装当前 HAP 固定版本，不伪造已经更新到上游最新版。x86_64 构建仍明确提示包分发需要 ARM64 设备。
+## 应用管理的包
 
-## 安装和恢复
+- 同名的仓库包永远不会被解包；如有仓库包把它们当依赖，改用本地版本，并检查版本约束，不满足就失败并给出依赖链。与本地包路径相同的仓库文件让事务失败。
+- `upgrade`、`update`、安装或移除其他包都保留已安装副本的字节和记录摘要，并提示"kept app-managed"。
+- 新 HAP 带来不同版本时，由终端会话启动时的应用迁移器处理：只替换已安装的本地包，不新增原本未安装的包，并且不联网。迁移完成前，`pkg` 拒绝所有会修改包的命令。
+- 新版应用不再提供某个本地包时，已安装副本保留，名字仍不允许远程包替换。
 
-- 软件位于 `native/packages/root`；请求集合、版本及来源位于 `.hish-package`。自举为 `native/packages/bootstrap-摘要`。保留已有 HOME、配置和用户文件。
-- 每份 APK 用上游公钥验签，接受 aarch64/noarch；包名只做格式校验，防止选项、路径或 URL 被当作名称。没有 allow-untrusted 或关闭证书验证的透传。
-- Bun 下载使用自举 libfetch/OpenSSL，固定 CA、校验证书与主机名，再校验完整归档 SHA512。摘要缓存位于 `native/packages/cache`，每次复用重新校验。
-- 新代次在 `.transaction-*` 下解包，验证 gzip/tar、路径、包元数据及架构。APK 模式必须有 PKGINFO；Bun 的 tgz 模式仅在完整性校验后使用。
-- 不执行 APK 安装脚本、触发器和服务操作。运行时依赖这些系统动作的软件需要进一步适配，此限制不以包名白名单实现。
-- 文件软/硬链接在所有包提取后转为同根目录内的普通文件副本；保留目标字节和执行权限。拒绝逃逸、循环/无目标链接、设备及文件冲突。目录链接暂不支持。
-- 每份归档限制为压缩64MiB、解压128MiB；目前支持 gzip/tar APK。其他格式和超限输入明确失败，不激活半成品。
-- flock 排他操作；旧代次保留为 `previous`。切换失败恢复旧目录；两次重命名之间中断时，下次 pkg 恢复。没有断电持久性或与运行中应用升级完全无缝的保证。
-- PATH 优先软件目录，避免旧底座转发脚本遮住新安装的同名程序。Linux 库搜索通用包含软件目录，不把每个仓库应用登记成原生 applet。
+## 安装语义
+
+- 软件位于不可变代次 `native/packages/generations/gNNNNNN`，活动代次记录在普通文件 `active` 中，用原子重命名切换，不依赖符号链接。
+- 每个会话在启动时固定一个代次，写入 `HISH_PACKAGE_ROOT` 和 PATH。会话启动的程序一直使用该代次。终端里的 `pkg` 是 `$ENV` 加载的 shell 函数，事务完成后只把当前窗口切到新代次。
+- 清理旧代次时保留活动代次和最近一个完整代次，以及任何进程的 exec 环境里仍引用的代次。`/proc` 读不了时也保留。
+- 崩溃恢复会丢弃未完成的 `.tmp-*` 事务；活动记录无效时，回到最新的完整代次。恢复不联网。
+- 事务失败不会发布代次：如果请求的包既没有下载到、也不在当前代次里，整个事务中止，已安装的包保持原样。仓库下载为空或只完成一部分时不会生成更小的代次。
+- 不执行 APK 安装脚本和触发器。带此类脚本的包会照常安装，但标为 `unconfigured`，脚本原文存放在代次的 `.hish-package/scripts/包名/`。原因见 [兼容方案](compatibility-package-refactor.md)。
+- 链接按设备能力处理。能创建符号链接时保留真实链接；不能时，文件链接存为副本并计数显示，目录链接会让事务失败。
+- 用户改过的包文件不会被静默覆盖：保留用户的版本，新版本另存为 `路径.hish-new`。
+- 归档检查覆盖 gzip/tar 完整性、路径逃逸、重复条目、设备文件、链接循环与逃逸，以及压缩 64MiB / 解压 128MiB 上限。
+
+## 旧布局导入
+
+首次运行会只读导入旧版 `native/packages/root`：记录快照写入 `state/legacy-snapshot`，文件复制到新代次，旧目录保持不变。本地包逐文件与 HAP 载荷比对，一致才认定为 app-managed，否则标为 `legacy-unknown`，需先 `pkg remove` 再安装。Bun 按原记录的 SHA-512 归入 npm 来源。仓库包在第一次联网事务后才有逐文件记录，在此之前不能离线重用。
 
 ## PRoot 适配
 
-原版 PRoot 的临时 loader 内核 execve 在真机返回 EACCES13。端口保留 PRoot 的路径/系统调用跟踪，改用允许执行的系统 Toybox 和现有 HiSH 引导库。PRoot 将有界装载脚本放在保留的环境区，保持内核初始栈交给 OHOS 链接器，再由平台适配器映射真实目标段并转入来宾。
+原版 PRoot 的临时 loader 内核 execve 在真机返回 EACCES13。端口保留 PRoot 的路径与系统调用跟踪，改用允许执行的系统 Toybox 和 HiSH 引导库：装载脚本放在保留的环境区，由平台适配器映射真实目标段，沿用 RW、复制、RX 路线，拒绝 W+X。seccomp 加速关闭，仍使用 ptrace。它不授予内核 root，也不是安全隔离边界。
 
-代码映射沿用 RW、复制、RX 路线，拒绝 W+X、可执行栈、段重叠和地址冲突，不授予内核 root/chroot。来宾 exec 交给 PRoot，避免再次进入普通执行桥。seccomp 加速关闭，仍使用 ptrace 跟踪。
+已测范围是 ARM64 musl rootfs 的文件、shell 和 fork/exec。glibc rootfs、任意静态程序和完整发行版生命周期未证明。
 
-端口自动透传运行所需的 `/system`、HiSH 原生库目录及 OHOS 链接器 namespace 配置；它不是安全隔离边界。rootfs、绑定路径和工作目录由调用者选择。PRoot 包含 talloc 依赖；HAP 自举保存按需安装的端口产物和探针，不自带发行版 rootfs。
+## 验证
 
-已测 ARM64 musl rootfs 的文件读取、shell、子命令与 fork/exec。glibc rootfs、任意静态程序、安装器、systemd 和完整发行版生命周期不由这些测试证明。
-
-## 来源与验证
-
-自举输入见 `bootstrap-lock.json`；PRoot 源码、uthash 和构建头文件逐份校验，编译缓存校验指纹及产物摘要。源代码改动在构建脚本中使用唯一锚点，漂移即失败。`licenses/packages.txt` 保留许可和源码入口。
-
-`node --test tests/package-manager.cjs` 用已有 g++/zlib 执行真实 C++ 解包器，覆盖路径、链接、gzip/tar 损坏、截断、APK元数据、上游tgz模式和输入篡改。真机结果及精确包信息见 [验收](verification.md)。
+`node --test tests/package-core.cjs` 在主机上用假仓库驱动真实的事务代码，覆盖锁定、冲突、迁移、导入、崩溃点、旧代次清理、脚本与链接记录和远程来源校验。`tests/package-manager.cjs` 覆盖真实解包器与自举数据。真机结果见 [验收](verification.md)。

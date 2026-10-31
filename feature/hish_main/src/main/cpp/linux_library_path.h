@@ -74,12 +74,13 @@ static inline int HishMuslLibraryPath(char* output, size_t capacity,
         at = end + 1;
         if (!*at) { errno = EINVAL; return -1; }
     }
-    // Ordinary downloaded packages retain upstream SONAMEs and their own
-    // standard layout. The HAP's ABI libraries still take precedence.
-    const char* packageSuffixes[] = {"/packages/root/usr/lib", "/packages/root/lib"};
-    for(size_t i=0;i<sizeof(packageSuffixes)/sizeof(packageSuffixes[0]);i++){
-        if(strlen(nativeRoot)+strlen(packageSuffixes[i])>=sizeof(directory)){errno=ENAMETOOLONG;return -1;}
-        strcpy(directory,nativeRoot);strcat(directory,packageSuffixes[i]);
+    // Packages keep upstream SONAMEs and their standard layout inside the
+    // generation this process was started with. HAP ABI libraries still win.
+    const char* packages = HishEnvironmentValue(environment, "HISH_PACKAGE_ROOT");
+    const char* packageSuffixes[] = {"/usr/lib", "/lib"};
+    for(size_t i=0;packages&&*packages=='/'&&i<sizeof(packageSuffixes)/sizeof(packageSuffixes[0]);i++){
+        if(strlen(packages)+strlen(packageSuffixes[i])>=sizeof(directory)){errno=ENAMETOOLONG;return -1;}
+        strcpy(directory,packages);strcat(directory,packageSuffixes[i]);
         if(HishPrivateLibraryDirectory(output,capacity,directory,nativeRoot,installedRoot))return -1;
     }
     const char* suffix = "/usr/lib/musl";

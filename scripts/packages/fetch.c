@@ -36,8 +36,24 @@ extern const EVP_MD *EVP_sha512(void);
 extern int EVP_DigestInit_ex(EVP_MD_CTX *,const EVP_MD *,void *);
 extern int EVP_DigestUpdate(EVP_MD_CTX *,const void *,size_t);
 extern int EVP_DigestFinal_ex(EVP_MD_CTX *,unsigned char *,unsigned *);
+// Registry metadata has no digest known in advance: TLS and hostname checks
+// still apply, the size is capped and the caller validates the content.
+static int fetch_metadata(const char *url,const char *file) {
+    if(strncmp(url,"https://",8)){fprintf(stderr,"HTTPS required\n");return 1;}
+    fetchTimeout=30;fetch_check_certificate(1);fetchIO *stream=fetchGetURL(url,"");
+    if(!stream){fprintf(stderr,"fetch: category=%u code=%d\n",fetchLastErrCode.category,fetchLastErrCode.code);return 1;}
+    int fd=open(file,O_CREAT|O_EXCL|O_WRONLY|O_CLOEXEC,0600),rc=1;size_t total=0;unsigned char buffer[32768];
+    if(fd<0){perror("metadata file");fetchIO_close(stream);return 1;}
+    for(;;){ssize_t n=fetchIO_read(stream,buffer,sizeof buffer);if(n<0&&errno==EINTR)continue;if(n<0)goto done;if(!n)break;
+        total+=n;if(total>4*1024*1024){fprintf(stderr,"metadata size limit\n");goto done;}
+        size_t at=0;while(at<(size_t)n){ssize_t w=write(fd,buffer+at,n-at);if(w<0&&errno==EINTR)continue;if(w<=0)goto done;at+=w;}}
+    rc=0;
+done:
+    if(close(fd))rc=1;fetchIO_close(stream);if(rc)unlink(file);return rc;
+}
 int main(int argc,char **argv) {
-    if(argc!=4||(strlen(argv[3])!=64&&strlen(argv[3])!=128)){fprintf(stderr,"usage: fetch-helper HTTPS_URL|--hash FILE SHA256_OR_SHA512\n");return 1;}
+    if(argc==4&&!strcmp(argv[1],"--any"))return fetch_metadata(argv[2],argv[3]);
+    if(argc!=4||(strlen(argv[3])!=64&&strlen(argv[3])!=128)){fprintf(stderr,"usage: fetch-helper HTTPS_URL|--hash FILE SHA256_OR_SHA512 | --any HTTPS_URL FILE\n");return 1;}
     const unsigned digest_size=strlen(argv[3])/2;
     const int hash_only=!strcmp(argv[1],"--hash");
     if(!hash_only&&strncmp(argv[1],"https://",8)){fprintf(stderr,"HTTPS required\n");return 1;}

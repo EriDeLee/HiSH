@@ -1,0 +1,6 @@
+{
+  "jq": "jq -ne '({answer: (6*7), text: \"中文\"} | .answer == 42 and .text == \"中文\")' >/dev/null",
+  "zstd": "printf 'HiSH zstd roundtrip 中文\\n' > input && for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do cat input input > next && mv next input || exit 1; done && zstd -q -f input -o input.zst && zstd -q -d -f input.zst -o output && cmp input output",
+  "bun": "bun -e \"import assert from 'node:assert/strict';assert.equal(6*7,42);const c=Bun.spawn([process.execPath,'-e','console.log(42)'],{stdout:'pipe'});assert.equal((await new Response(c.stdout).text()).trim(),'42');assert.equal(await c.exited,0);\"",
+  "proot": "g=$HISH_CHECK_DIR/root && mkdir -p $g/bin $g/lib $g/proc $g/dev && cp $HISH_PACKAGE_ROOT/usr/libexec/hish/proot-probe $g/bin/probe && cp $HISH_NATIVE_LIBDIR/libhish_linux_musl_loader.so $g/lib/ld-musl-aarch64.so.1 && chmod 700 $g/bin/probe $g/lib/ld-musl-aarch64.so.1 && printf 'HISH_ROOTFS_42\\n' > $g/hish-marker && proot -r $g -w / -b /proc:/proc -b /dev:/dev /bin/probe"
+}

@@ -18,6 +18,15 @@ test('actual native extractor rejects traversal, escaping and cyclic links, dupl
 test('native extractor reads concatenated APK gzip members and never executes control scripts',()=>{const r=extract(Buffer.concat([tar([meta,{name:'.post-install',bytes:'exit 99\n'}]),tar([{name:'usr/bin/app',bytes:'original'}])]));assert.equal(r.status,0,r.stderr);assert(!fs.existsSync(path.join(r.dest,'.post-install')));});
 test('native extractor rejects corrupt gzip, tar checksums and truncated payloads',()=>{const b=tar([meta,{name:'usr/bin/app',bytes:'x'}]);const corrupt=Buffer.from(b);corrupt[corrupt.length-8]^=1;assert.notEqual(extract(corrupt).status,0);assert.notEqual(extract(b.subarray(0,b.length-5)).status,0);const raw=zlib.gunzipSync(b);raw[0]^=1;assert.notEqual(extract(zlib.gzipSync(raw)).status,0);});
 test('bootstrap preparation pins every upstream input and changes deterministically',async()=>{const {prepare}=require('../scripts/packages/prepare.cjs');const a=await prepare(),b=await prepare();assert.deepEqual(a,b);const manifest=JSON.parse(fs.readFileSync(path.join(repo,'.test/packages/provenance.json')));assert(manifest.files.some(f=>f.name==='sbin/apk'));assert(manifest.files.some(f=>f.name.endsWith('.rsa.pub')));assert(!manifest.files.some(f=>/\/bin\/(jq|zstd|git|curl)$/.test(f.name)));});
+test('every app-managed payload in the manifest is in the bootstrap under local/ with its digest',()=>{
+ const provenance=JSON.parse(fs.readFileSync(path.join(repo,'.test/packages/provenance.json'))),files=new Map(provenance.files.map(f=>[f.name,f.sha256]));
+ const blob=zlib.gunzipSync(fs.readFileSync(path.join(repo,'.test/packages',provenance.sha256+'.gz')));let manifest;
+ for(let at=8;at<blob.length;){const n=blob.readUInt32LE(at),size=blob.readUInt32LE(at+4),name=blob.toString('utf8',at+12,at+12+n);if(name==='etc/hish/packages.json')manifest=JSON.parse(blob.toString('utf8',at+12+n,at+12+n+size));at+=12+n+size;}
+ assert(manifest&&manifest.format===1);
+ const payloads=manifest.local.flatMap(p=>p.kind==='apk'?[{payload:p.payload,sha256:p.sha256}]:p.files);assert(payloads.length>0);
+ for(const p of payloads)assert.equal(files.get('local/'+p.payload),p.sha256,p.payload);
+ assert.deepEqual(manifest.local.map(p=>p.name).sort(),['proot','talloc']);assert(!manifest.local.some(p=>/^(bun|jq|zstd|git|curl)$/.test(p.name)));
+});
 test('the real bootstrap input validator rejects changed upstream package bytes',()=>{const {verifiedArchive}=require('../scripts/packages/prepare.cjs'),pkg=require('../scripts/packages/bootstrap-lock.json').packages[0],bytes=fs.readFileSync(path.join(repo,'.test/packages',pkg.file));assert(verifiedArchive(bytes,pkg).has('sbin/apk'));const changed=Buffer.from(bytes);changed[100]^=1;assert.throws(()=>verifiedArchive(changed,pkg),/checksum/);});
 test('upstream tgz extraction is explicit; APK mode still requires signed package metadata',()=>{
  const dir=fs.mkdtempSync(path.join(root,'tgz-')),file=path.join(dir,'input.tgz'),dest=path.join(dir,'unpacked');

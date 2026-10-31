@@ -9,6 +9,7 @@
 #include "elf_code_mapping.h"
 #include "elf_execution_access.h"
 #include "linux_library_path.h"
+#include "elf_abi.h"
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -181,9 +182,12 @@ int Execute(const std::string& path,char* const argv[],Runtime runtime,const cha
     Image program;if(!program.Read(path))return -1;Mapping main;if(!main.Load(program,ptraceLoad))return -1;
     const auto libraries=LibraryDir();Image interpreter;Mapping loader;
     if(!program.interpreter.empty()){
-        if(runtime==Runtime::Automatic)runtime=program.interpreter.find("ld-linux-aarch64")!=std::string::npos?Runtime::Glibc:program.interpreter.find("ld-musl-aarch64")!=std::string::npos?Runtime::Musl:Runtime::Automatic;
+        if(runtime==Runtime::Automatic){
+            const auto abi=HishInterpreterAbi(program.interpreter.c_str());
+            runtime=abi==HishAbiGlibc?Runtime::Glibc:abi==HishAbiMusl?Runtime::Musl:Runtime::Automatic;
+        }
         const std::string interpreterPath=runtime==Runtime::Musl?libraries+"/libhish_linux_musl_loader.so":runtime==Runtime::Glibc?libraries+"/libhish_linux_glibc_loader.so":runtime==Runtime::Ohos?"/lib/ld-musl-aarch64.so.1":"";
-        if(interpreterPath.empty()){Fail("unsupported ELF interpreter",ENOEXEC);return -1;}
+        if(interpreterPath.empty()){Fail("unsupported ELF interpreter/ABI",ENOEXEC);failure+=" ("+program.interpreter+")";return -1;}
         if(!interpreter.Read(interpreterPath)||!loader.Load(interpreter))return -1;
     }
     std::vector<std::string> arguments,environment;size_t total=0;
