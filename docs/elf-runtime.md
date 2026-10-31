@@ -4,6 +4,17 @@
 
 `native_elf.cpp` 与 `linux/exec.c` 校验 ELF 类型、架构、段边界、地址范围、页重叠、可执行栈和权限。固定地址用自有地址预留，不覆盖既有非自有映射。默认代码路径不是历史 `hish-run`。
 
+## 固定地址程序与 ArkTS 静态堆
+
+静态 ArkTS 运行时用 32 位对象指针，因此把对象堆放在内存前 4GiB：商用系统在实测固件上从 256KiB 处预留 512MiB，`/proc/self/maps` 显示为 `[anon:ArkTs Static ...]` 若干段加一段无名 `rw-p`，覆盖 `0x00140000-0x20040000`。OpenHarmony 源码中对应 `PANDA_32BITS_HEAP_START_ADDRESS`（按 256KiB 对齐）与 `MapRWAnonymousInFirst4GB` 的预留；商用源码不可见，此归属是按地址、大小和命名比对的推断。
+
+终端会话是应用进程的 fork 副本，会继承这段预留，而这段内不会再有 ArkTS 代码运行。固定地址（ET_EXEC）程序如 Bun（`0x00200000-0x062ec000`）正好落在其中，预留时得到 EEXIST，用户可见为 `File exists`。
+
+`elf_dormant_heap.h` 只在预留失败且错误为 EEXIST 时读一次 `/proc/self/maps`，仅当整个重叠区都属于那段可证明的休眠副本——以 `[anon:ArkTs Static` 开头、之后无空隙的匿名私有读写段、零偏移零设备零 inode、两端按 256KiB 对齐、总长不超过 4GiB——才释放重叠部分并重试一次；其他任何映射都使整次释放放弃，保留原报错。释放只发生在即将被替换的命令进程里，会话 shell 与应用进程的堆不受影响。
+
+会话子进程设置 `HISH_SESSION_COPY=1`；没有该标记的进程不释放任何映射。不碰撞的程序不读内存表，因此没有额外开销。
+
+
 文件 RX 返回 EACCES/EPERM 时，`elf_code_mapping.h` 在已预留范围内建立匿名 RW，复制真实输入字节，清指令缓存，再转 RX；任何一步失败都终止。不创建 W+X，不按文件字节相同转发给另一个随包程序。普通私有 ELF 仍要求执行位。
 
 ## 内核 exec 桥

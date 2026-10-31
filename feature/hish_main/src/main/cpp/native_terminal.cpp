@@ -411,6 +411,11 @@ extern "C" __attribute__((visibility("default"))) void HiSHNativeMain(NativeChil
     close(watch);
     signal(SIGTERM, SIG_DFL);
     if (isatty(STDIN_FILENO)) { ioctl(STDIN_FILENO, TIOCSCTTY, 0); }
+    // This process is a fork copy of the app: no ArkTS code runs here again, so
+    // an inherited dormant static ArkTS heap may be reclaimed by a fixed-address
+    // program (see elf_dormant_heap.h). The app process itself never sets this,
+    // which keeps its live heap out of reach.
+    setenv("HISH_SESSION_COPY", "1", 1);
     setenv("HOME", (root + "/home").c_str(), 1);
     setenv("PWD", (root + "/home").c_str(), 1);
     setenv("PREFIX", (root + "/usr").c_str(), 1);

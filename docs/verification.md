@@ -2,7 +2,16 @@
 
 更新：2026-10-31。包内容、源码状态和手机状态分别记录。
 
-## 当前：代次化包管理器重构（2026-10-31）
+## 当前：固定地址程序在提示符下可运行（2026-10-31）
+
+- 症状：提示符下 `bun` 报 `File exists`、退出码 126，而脚本里的 bun 正常。原因是会话 shell 是应用进程的 fork 副本，继承了静态 ArkTS 运行时在前 4GiB 预留的 512MiB 对象堆（实测 `0x00140000-0x20040000`，应用侧同一块 523,264kB、实际占用 0kB）；Bun 的固定地址 `0x00200000-0x062ec000` 落在其中，预留时返回 EEXIST。
+- 修复：仅在 EEXIST 时读一次 `/proc/self/maps`，只释放可证明属于休眠 ArkTS 静态堆的重叠部分，再重试一次；其他映射一律不碰，保留原报错。仅限带 `HISH_SESSION_COPY=1` 的会话副本，且只发生在即将被替换的命令进程。不碰撞的程序不读内存表。
+- 真机（build-7）：会话 shell pid 22476 仍有 5278 个映射、`OVERLAP 00140000-20040000` 仍在，同一窗口内 `bun --version` 输出 `1.4.4`、退出码 0，`bun h.js` 输出 `42`；`jq -n 42`、`zstd` 1.5.7、`pkg list` 输出与改动前一致；标记 `HISH_SESSION_COPY=1`。
+- 签名 HAP 11,519,123 字节，SHA256 `06a47eae6cd683353bb236f6bd5bb67cd3d2810a000c7830bee66a6137a37004`；覆盖安装成功。证据在 `hish-pkg-refactor/build-7`、`device-16`。
+- 主机：新增 `tests/elf-dormant-heap.cjs`（12 个用例）通过。同一位置另测 `package-core` 13/13 通过；在 `Documents` 仓库内该项仍随机出现 `cannot rename: Permission denied`（文件同步/杀毒干扰，换位置即不复现，与本改动无关）。
+- 未由本轮证明：其他固件若改名或改布局，会退回原来的 `File exists`；除 Bun 外的其他固定地址程序；释放前后的异常退出路径；ArkTS 归属是源码比对推断，商用固件源码不可见。
+
+## 前轮：代次化包管理器重构（2026-10-31）
 
 - 包管理器改为不可变代次：`native/packages/generations/gNNNNNN`，`active` 指针原子切换；会话固定自己的代次与 PATH，运行中的程序不受后续安装影响。
 - 真机完整生命周期通过（`REFACTOR_LIFECYCLE_EXIT=0`，`REFACTOR_LIFECYCLE_PASS`）：旧布局导入、`pkg doctor`/`info`、`pkg upgrade` 保留应用自带包、离线 `remove proot` 后重装字节一致、`talloc` 守卫、`bash` 安装脚本记录为未运行并标记 `unconfigured`、`bash`/`tree` 实跑、代次保留与回收、`nginx` 目录符号链接拒绝且不激活、并发锁、registry 更新查询、不存在的包与非法路径拒绝、`pkg doctor --functional --capabilities` 中 proot 与 bun 功能探针通过。

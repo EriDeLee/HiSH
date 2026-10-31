@@ -7,6 +7,7 @@
 #include "process_identity.h"
 #include "native_ptrace_loader.h"
 #include "elf_code_mapping.h"
+#include "elf_dormant_heap.h"
 #include "elf_execution_access.h"
 #include "linux_library_path.h"
 #include "elf_abi.h"
@@ -44,6 +45,30 @@ constexpr Tool tools[] = {
     {nullptr,nullptr,Runtime::Automatic}
 };
 bool Fail(const char* stage, int error) { errno=error; failure=std::string(stage)+": "+strerror(error); return false; }
+// A terminal session is a fork copy of the app process, so it inherits the
+// static ArkTS heap reservation even though no ArkTS code runs in it again.
+// A fixed-address image may therefore reclaim the overlap. Only verified parts
+// of such a dormant copy are released, and only inside a session copy: the app
+// process itself keeps its live heap. Programs that do not collide never read
+// the map, so they pay nothing.
+bool ReleaseDormantArkTsCopy(uintptr_t low, uintptr_t high)
+{
+    if (!getenv("HISH_SESSION_COPY")) return false;
+    const int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    std::string text; char chunk[65536];
+    for (;;) {
+        const ssize_t count = read(fd, chunk, sizeof(chunk));
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        text.append(chunk, static_cast<size_t>(count));
+    }
+    close(fd);
+    std::vector<hish::DormantRange> release;
+    if (!hish::PlanDormantArkTsRelease(text.data(), text.size(), low, high, release)) return false;
+    for (const auto& range : release) if (munmap(reinterpret_cast<void*>(range.begin), range.end - range.begin)) return false;
+    return true;
+}
 std::string LibraryDir()
 {
     Dl_info info{};
@@ -101,7 +126,10 @@ struct Mapping {
         if(high<=low||high-low>256*1024*1024||!executableEntry)return Fail("ELF image size/entry",ENOEXEC);
         size=high-low;
         if(image.header.e_type==ET_EXEC){
-            area=mmap(reinterpret_cast<void*>(low),size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+            const int reservationFlags=MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE;
+            area=mmap(reinterpret_cast<void*>(low),size,PROT_NONE,reservationFlags,-1,0);
+            if(area==MAP_FAILED&&errno==EEXIST&&ReleaseDormantArkTsCopy(low,low+size))
+                area=mmap(reinterpret_cast<void*>(low),size,PROT_NONE,reservationFlags,-1,0);
             if(area==MAP_FAILED){
                 const int error=errno;
 #ifdef HISH_ENABLE_DIAGNOSTICS

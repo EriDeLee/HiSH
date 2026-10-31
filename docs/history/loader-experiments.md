@@ -28,7 +28,7 @@ TRACEME/ATTACH/SEIZE、寄存器/内存、fork/clone/exec 事件、自有代码�
 
 后续 `hish-run` 为自有目标预留映像，映射随包 RX 模板、写实际代码后 detach；动态符号/TLS仍交给解释器。限制64MiB输入、256MiB映像、16MiB待写代码，拒绝W+X、代码BSS和段页重叠。该实验有额外监督进程，PID不等于命令PID，旧 OHOS 映射仍在。
 
-TinyCC 原默认0x400000与引导匿名映射0x00140000..0x20040000冲突，mrsh和bridge均EEXIST17；0x60000000受控链接成功。这促成后来编译器适配，不是通用固定地址重定位。
+TinyCC 原默认0x400000与引导匿名映射0x00140000..0x20040000冲突，mrsh和bridge均EEXIST17；0x60000000受控链接成功。这促成后来编译器适配，不是通用固定地址重定位。该匿名映射现已归因为静态 ArkTS 运行时的对象堆预留，处理见 [ELF 运行时](../elf-runtime.md)。
 
 seccomp action 查询errno95、sizes22，NEW_LISTENER22；NO_NEW_PRIVS成功不等于用户通知可用。`--notify` 的 getppid CONTINUE 路径未通过，父端EPROTO71是次生错误，不能以聚合失败否定其他通过用例，也不能静默降级通知。
 
