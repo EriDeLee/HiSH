@@ -18,6 +18,10 @@ __attribute__((visibility("default"))) const char* HishLinkExecutablePath(const 
     return p;
 }
 
+// epoll.c (the same library) fixes epoll for programs that call it through syscall(), which is how Bun registers its polls. It
+// is asked first and does not depend on the link emulation being enabled.
+extern int hish_epoll_syscall(long number, long a, long b, long c, long d, long e, long f, long* result) __attribute__((weak));
+
 // Raw syscall() callers (Bun, Rust's libc crate) reach the same code. Anything else goes straight through.
 long syscall(long number, ...)
 {
@@ -27,6 +31,7 @@ long syscall(long number, ...)
     const long d = va_arg(arguments, long), e = va_arg(arguments, long), f = va_arg(arguments, long);
     va_end(arguments);
     long r;
+    if (hish_epoll_syscall && hish_epoll_syscall(number, a, b, c, d, e, f, &r)) return finish(r);
     if (!enabled) return finish(raw(number, a, b, c, d, e, f));
     switch (number) {
     case HL_OPENAT: r = openat_core((int)a, (const char*)b, (int)c, (mode_t)d); break;

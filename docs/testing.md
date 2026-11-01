@@ -5,7 +5,7 @@
 从仓库根执行；测试使用已有 SDK 和缓存，在 `.test` 写隔离输出，不安装工具：
 
 ```cmd
-node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs tests/package-core.cjs tests/elf-dormant-heap.cjs tests/toybox-exec.cjs tests/symlink-emulation.cjs
+node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs tests/package-core.cjs tests/elf-dormant-heap.cjs tests/toybox-exec.cjs tests/symlink-emulation.cjs tests/epoll-emulation.cjs
 node tests/native-session.cjs
 node tests/terminal-codec.cjs
 git diff --check
@@ -46,6 +46,18 @@ HISH_LINKS=0 ./linux_links_musl --ab TREE
 ```
 
 三份 `--ab` 输出在不含链接的树上必须逐字节相同；树里有目录链接时，开着与关着的输出必须不同，这证明 `HISH_LINKS=0` 真的回到了 C 库自己的函数。系统命令用 `find`、`stat`、`cp`、`mv`、`touch`、`tar` 等在含链接的目录里对照 `HISH_LINKS=0` 的结果。
+
+## epoll 的设备检查
+
+同一个脚本也编出 `linux_epoll_musl` 和 `linux_epoll_glibc`（`tests/fixtures/linux_epoll.c`）。送进应用的 home，`chmod 700` 后在终端运行：
+
+```sh
+./linux_epoll_musl                  # 每项 PASS，末行 EPOLL_C_TOTAL pass=N fail=0
+./linux_epoll_glibc
+HISH_EPOLL=0 ./linux_epoll_musl     # 对照：一次性相关的项必须 FAIL，epoll_pwait2 的项仍 PASS
+```
+
+对照那次的失败项证明检查程序分得出开关。空闲 CPU 的验证用普通 Bun：`process.stdout.write` 一次后空闲，看 `top -H` 里每个线程；修正前主线程和 Worker 各约 100%，见 [验收](verification.md)。`tests/fixtures/epoll_probe.c` 是原始探针，直接打印内核对一次性、边沿触发、停用方式的回答，用来判断某台手机的内核本身怎样。
 
 ## 手机复验
 

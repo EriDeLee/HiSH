@@ -2,7 +2,69 @@
 
 更新：2026-11-01。包内容、源码状态和手机状态分别记录。
 
-## 当前：系统命令认链接、glibc 层、C 库内部函数、pkg doctor 旧错误（2026-11-01）
+## 当前：epoll 修正，opencode 空闲 CPU 从约 200% 降到约 2%（2026-11-01）
+
+- 修改（设计和限制见 [epoll 修正](epoll.md)）：
+  - `linux/epoll.c` 和 `hish_epoll_core.h`：两个 Linux 预加载库（musl 的 `libhish_linux_identity_padded.so`、glibc 的 `libhish_linux_glibc_tty.so`）模拟 `EPOLLONESHOT`；`epoll_pwait2` 和 `syscall(441)` 转成 `epoll_pwait`（始终开启）；`HISH_EPOLL=0` 关闭模拟，`HISH_EPOLL=1` 强制开启，默认首次出现一次性登记时自测内核。`linux/links.c` 的 `syscall()` 先问 `hish_epoll_syscall`（弱引用）。
+  - `scripts/linux/build.cjs`：两个库都编 `epoll.c`，运行库输入清单加入 `linux/epoll.c` 和 `hish_epoll_core.h`。
+  - 设备检查程序 `tests/fixtures/linux_epoll.c`（`scripts/linux/link-check-build.cjs` 一并编出）；`tests/fixtures/epoll_probe.c` 是此前的探针。
+- 主机：101 项 node:test 通过（上一轮 97 项，新增 `tests/epoll-emulation.cjs` 4 项）。记账代码在两个模型内核上跑 43 个单项和 120000 步随机游走（与 Linux 模型逐步一致）；我对记账故意做了两处破坏（送出后不删内核登记；重新装填时不把 MOD 改成 ADD），测试都能抓到。另有严格告警编译（musl、glibc 的 `epoll.c`、`links.c`、设备检查程序）、设备检查程序能链接、设计约束。`tests/symlink-emulation.cjs` 里三条关于 `build.cjs` 的断言改成不依赖相邻文字。
+- 真机：build-10（device-13）HAP 11,624,624 字节，SHA256 `c4a14afe4d8a33aa25448353efa6f088cff02752246685e19c2664a98cc48510`，用 `hish-debug.p7b` 签名后覆盖安装，授权仍只有 INTERNET。
+- 设备检查程序（`hish-epoll-1.sh`，`linux_epoll_musl` 和 `linux_epoll_glibc`）：
+  - 修正开着：musl 31 项、glibc 31 项全部通过。包括：一次性登记只报一次、MOD 重新装填再报一次、DEL 和 ENOENT 语义、读端数据在停用期间到达后重新装填时报出、管道/套接字/eventfd、边沿触发和电平触发不受影响、经 `syscall()` 的登记和等待、带信号掩码的 `epoll_pwait`、新建 epoll 描述符不继承旧记录、三种 `epoll_pwait2` 调用（`syscall(441)`、亚毫秒超时、函数）在子进程里返回事件而不是被杀、4 个线程各 4000 轮装填和触发。
+  - 对照 `HISH_EPOLL=0`：musl 与 glibc 各 31 项里 15 项失败（都是一次性相关），16 项通过，其中四项与 `epoll_pwait2` 有关，说明那部分不受开关影响。`HISH_EPOLL=1`（跳过自测强制开启）：31 项通过。
+- 普通 Bun（`hish-bun-1.js`，`hish-bun-1.sh` 与 `hish-bun-2.sh`，进程内自测）：
+  - stdout 在管道：9 项全部通过，最后往管道打印 3,000,000 字节，`wc -c` 数到 3,000,010（多出的 10 字节是 Worker 的 `worker up`）。内容：子进程输出与退出码、子进程通过管道输出 2,000,000 字节（反压）、向子进程写 1 MiB 再原样读回、10 次 `spawnSync`、8 个子进程并行、本地服务器 5,000,000 字节应答加 20 个并行请求、100 毫秒定时器、`https://registry.npmjs.org` 返回 200、主线程和 Worker 都打印过后空闲 8 秒的进程 CPU 用量：3.7% 的一个核心。
+  - stdout 在终端：同样 9 项通过，空闲 3.4%。
+  - 对照 `HISH_EPOLL=0`（stdout 在管道）：功能 8 项仍通过，空闲一项失败，201.1%，重现了原来的占满。
+- 与修正前同样的线程采样（`hish-oc-37.sh`，stdout 在终端，空闲 35 秒，`top -H`，进程总 CPU，括号里是 build-9 的数）：什么都不输出 1.0%（1.6%）；主线程输出一次 1.6%（100.8%）；只有 Worker 输出一次 2.6%（102.4%）；两边都输出 2.8%（201.0%）。所有窗口里没有线程超过 20%。证据 `device-13/threads-37.txt`。
+- opencode 界面（`oc-idle/links3/inst`，1.19.5）：启动后的 8 个 5 秒窗口总 CPU 为 28.2、13.6、11.0、9.8、5.2、1.6、1.6、1.8（启动后约 25 秒内逐渐落下来），之后再采 8 个窗口：中位 1.8%，范围 0.9% 到 4.2%，没有线程超过 20%。修正前（build-9）8 个窗口中位 202.4%，范围 200.6% 到 223.2%。界面正常渲染；通过 HDC 输入 `typing test 123` 出现在提示框里；`/exit` 加回车回到提示符。常驻内存 695 到 698 MB（修正前 763 到 855 MB，未查是否与本改动有关）。
+- 回归（build-10）：
+  - Bun 一致性 33 项通过（`hish-links-1d.sh`）；`bun install opencode-ai` 12 秒，退出 0，日志里 symlink 或 EACCES 的行数为 0，`.bin/opencode` 是链接，`opencode --version` 1.19.5（`hish-links-3.sh`）。
+  - 链接的 C 库检查：musl 47 项、glibc 32 项通过，层开层关的输出逐字节相同（`hish-links-15.sh`）。
+  - 系统命令用例（`hish-links-8.sh`）与 build-9 逐行对照，只有时间戳、计时（预加载的系统小程序启动 10 次仍为 0.89 到 1.16 秒、Bun 1.48 秒）和代次名不同。
+  - 辅助命令用例（`hish-verify-7.sh`）与 build-8 对照，只有代次名和计时不同。
+  - git 和 curl（`hish-links-4.sh`）：`curl` 经会话证书变量 https 返回 200，`git` 本地提交、`git ls-remote` 经 https 都正常；`pkg doctor` 正常。
+  - opencode 自带工具（`hish-oc-23.sh`）：grep、glob、read、edit 的输出与 build-9 逐字节相同。这些工具通过 Bun 起 ripgrep 子进程读管道，走的正是一次性登记的路径。
+- 未验证：
+  - 其他手机或其他系统版本（自测在内核正常时会自动不介入，但没有在这样的内核上跑过）。
+  - 长时间运行（几小时）下表满、自旋锁的表现；只做过 4 个线程各 4000 轮。
+  - 界面里真正和模型对话（HTTP 流、子进程、文件监视同时发生）时的 CPU 和稳定性；免费额度用完，没做。
+  - 耗电和发热的实际变化：只量了 CPU 占用。
+  - 程序用内联 `svc` 发起的 epoll 调用绕过本层；`pthread_cancel` 打断 `epoll_pwait` 的行为未测（实现上仍交给 C 库的 `epoll_pwait`）。
+  - 没有可运行的真实 glibc 应用，glibc 一侧只用自己的检查程序验证。
+  - PRoot 里运行的程序是否经过这个预加载库，没有查。
+
+## 前轮：opencode 空闲 CPU 占满的原因（2026-11-01）
+
+- 结论（本机测量得出，未找到公开说明；这一节测量时没改任何代码，修复见上一节）：这台手机上 epoll 不执行 `EPOLLONESHOT`。HiSH 的装载层和预加载库没有任何 epoll 处理（源码里搜不到），系统调用原样进入内核，所以判断是内核行为；没有用手机自带的程序交叉验证。Bun 第一次碰 `process.stdout` 或 `process.stderr` 时，为它登记一个“可写、一次性”的 epoll 事件；Linux 在事件送出后自动停用这个登记，这里不会，于是这个永远可写的描述符让每次 `epoll_pwait` 都立即返回，事件循环从不睡眠。HiSH 的终端对 Linux 程序是一个套接字，管道也一样受影响；输出到普通文件不受影响。
+- 普通 Bun（不带 opencode）复现，build-9（device-12），`hish-oc-37.sh`，stdout 在终端，空闲 35 秒，`top -H` 每线程：
+  - 什么都不输出：整个进程 1.6%。
+  - 主线程输出一次：主线程 99.6%，进程 100.8%。
+  - 只有 Worker 输出一次：Worker 99.8%，进程 102.4%。
+  - 两边各输出一次：Worker 99.6% 加主线程 99.4%，进程 201.0%。这与 opencode 界面空闲时 `Worker` 和 `OS_FFRT_2_1` 各约 100% 完全一致。
+- 同一程序换输出对象（此前 `hish-oc-32.sh`，各 25 秒，进程 CPU）：`process.stdout.write` 到管道 99%，到文件 0%；只读 `process.stdout.isTTY` 或 `process.stderr.isTTY` 到管道 100%、98%；`console.log` 到管道 0%；不碰标准输出 0%。opencode 的 `debug wait`（无界面，`hish-oc-31.sh`，各 25 秒）也一样：stdout 为管道或终端 102% 到 106%，重定向到 `/dev/null` 或文件 6% 到 12%；stdin 来自 `/dev/null` 但 stdout 在终端仍是 102%。
+- 内核给出的登记（`hish-fdinfo.js`，经 `/proc/self/fdinfo/<epoll 描述符>`）：Bun 的 epoll 里有一项 `tfd: 5 events: 4000001c`，即 `EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLONESHOT`（0x4、0x8、0x10、0x40000000），描述符 5 是 stdout 的副本（管道 `pipe:[34010]`，或终端 `socket:[2003311]`）。送出事件之后这个值没有变；Linux 会把它清成 `0x40000000`。stdout 是文件时没有这一项（`epoll_ctl` 对普通文件返回 EPERM）。
+- Bun 源码（主干 `src/io/posix_event_loop.rs`，1.4.4 的行为以二进制为准）：`FilePoll::register_with_fd_impl` 在 `OneShot` 标志下给 `epoll_ctl` 加 `EPOLL::ONESHOT`，`on_update` 随后设 `NeedsRearm`，要写时用 `CTL_MOD` 重新登记；`unregister` 遇到 `NeedsRearm` 会跳过 `CTL_DEL`，也就是依赖内核已经停用。二进制里 `register_with_fd` 经 `syscall@plt` 调 `epoll_ctl`，等待经 `epoll_pwait@plt`，两者都不是内联 `svc`，预加载库可以拦。`bun_epoll_pwait2` 里还有三处内联 `svc`（系统调用 441，`epoll_pwait2`）；本机实际走 `epoll_pwait`（此前的 hiperf 采样里是它，进程也没有被 SIGSYS 杀死），所以拦截 `epoll_pwait` 就够。
+- 直接测内核（`tests/fixtures/epoll_probe.c`，`epoll_probe5`，管道、文件、终端三种 stdout 结果相同）：
+  - 管道写端、套接字对、eventfd 上登记 `EPOLLONESHOT`，连续三次 `epoll_wait(超时 0)` 都返回事件（`1 1 1`，Linux 为 `1 0 0`），`EPOLL_CTL_MOD` 之后依旧（`1 1 | MOD -> 1 1`）。
+  - `EPOLLET` 与 Linux 一致（`1 0 0`，MOD 之后再报一次）；电平触发与 Linux 一致。
+  - 事件送出后，用 `EPOLL_CTL_MOD(events=0)` 或 `EPOLL_CTL_DEL` 都能让它停下（`0 0 0`）；MOD(0) 之后读端关闭仍报 `EPOLLERR`（`1 1`），与 Linux 的 MOD 语义一致；DEL 之后可以再 ADD，再 DEL 一次返回 ENOENT。
+- 旁证：`epoll_pwait2`（系统调用 441）在本机会让调用者被 SIGSYS（信号 31，应用的 seccomp 过滤）杀死，`hish-oc-38.sh` 在子进程里调用，子进程被信号 31 终止。Bun 因版本检查不会调用它；glibc 2.39 的 `epoll_pwait2` 包装函数会直接触发。
+- 当时未做的修复（在 HiSH 的 Linux 预加载库里模拟 `EPOLLONESHOT`：拦 `epoll_ctl`、含经 `syscall()` 的调用，以及 `epoll_pwait`、`epoll_wait`；送出一次性事件后用 `EPOLL_CTL_DEL` 停用，下次 `MOD` 改成 `ADD`）已在 build-10 做了并验证，见上一节。
+- 证据（都在 `hish-node-127/device-12/`）：`threads-37.txt`（线程采样，从控制台抄下）、`hish-oc-34.txt`、`hish-oc-35.txt`、`fdinfo-tty.txt`、`epoll5-pipe.txt`、`epoll5-tty.txt`。
+
+## 前轮：opencode 的搜索和编辑工具（2026-11-01）
+
+- 没有改代码，只在 build-9（device-12）上装了一个包并测 opencode 自带的工具。包状态：`pkg install ripgrep` 装上 `ripgrep 15.1.0-r0`（Alpine），新代次 g000112。事务会把已装包的归档也重新下载校验（屏幕上逐个列出 `.apk: OK`），这次用了几分钟，未精确计时。
+- `rg` 本身（`hish-oc-20.sh`）：`rg --version` 报 15.1.0（pcre2），在示例项目里 `rg needle` 找到 `a.txt` 和 `sub/c.txt` 两处，`rg --files` 列出 3 个文件。
+- opencode 的工具，不用模型直接执行（`hish-oc-23.sh`，用 `opencode debug rg …` 和 `opencode debug agent build --tool … --params …`）：
+  - 有 `rg` 时：`debug rg files` 和 `debug rg search needle` 返回正确；`grep` 工具找到 2 处匹配（行号和内容正确），`glob` 工具列出 3 个 txt 文件，`read` 工具读出 3 行，`edit` 工具把 `alpha line` 改成 `ALPHA LINE`（“Edit applied successfully.”），文件内容确实变了。
+  - 把包目录从 PATH 里去掉（`rg` 找不到）时：`debug rg search` 和 `grep` 工具都报 `ripgrep execution failed`。这与读安装的程序文本得出的判断一致：先找 PATH 里的 `rg`，再找 `~/.local/share/opencode/bin/rg`，都没有就从 GitHub 下载，而本机访问 GitHub 被证书错误挡住。
+- 让免费模型真正驱动这些工具的整轮试验没做成：`opencode run` 在 4 秒后收到 `AI_APICallError: Free usage limit reached`（opencode 服务端对免费模型的用量上限），之后 `run` 不退出，直到我设的 500 秒超时。所以模型自己选工具、拼参数的那一段（多步对话、权限询问）仍未验证。`run` 在 API 报错后不退出是 opencode 的行为，没有查它是否与 HiSH 有关。
+- `edit` 之外的写入类工具（`write`、`bash`）、`/connect` 其他提供方、LSP 和格式化器（日志显示均被关闭）、`fff` 文件索引在项目目录里是否初始化成功，都未测。
+
+## 前轮：系统命令认链接、glibc 层、C 库内部函数、pkg doctor 旧错误（2026-11-01）
 
 - 修改：
   - 符号链接第 3 阶段：`shell_module.c` 让每个系统小程序都带着 `libhish_exec_bridge.so` 预加载启动（原先只有 8 个会启动程序的）；该库含 `links_ohos.c` 的导出副本（CMake `hish_links_export` OBJECT 库，`HISH_LINKS_EXPORT`），默认关闭，只在系统小程序里由库的构造函数打开。
@@ -27,7 +89,7 @@
 - 回归：Bun 一致性 33 项全过；`bun install opencode-ai` 新目录 11 秒（build-9 为 9 秒）完成，日志里 symlink 或 EACCES 的行数为 0，`node_modules/.bin/opencode --version` 在 shell 里直接得到 1.19.5；opencode 界面在 build-8 和 build-9 都能打开（截图 `device-11/ui/`、`device-12/ui/`），Ctrl+C 退出回到提示符；上一轮 8 个辅助命令的启动、退出码、环境一致性用例（`hish-verify-7.sh`，build-8）结果与 device-8 相同，`env -i` 清掉 `HISH_PACKAGE_ROOT` 的既有限制不变。
 - `pkg doctor`：此前输出 `last migration error: read …/bootstrap-b7bcb46c…/talloc-2.4.3-r0.apk`，同时显示 `app manifest … (accepted)`。该记录来自一个旧版本（自举目录摘要 `b7bcb46c…` 不是当前的 `d7a02a83…`），迁移器在无待迁移项时提早返回，从不删它。新版本第一次会话启动后，`state` 目录只剩 `accepted-manifest`、`legacy-snapshot`、`remote`，`pkg doctor` 不再显示该行。
 - 为评估下一步做的只读测量（build-9，`hish-probe-16.sh` 至 `19.sh`、`cpuwatch.cjs`）：
-  - opencode 停在界面不动时，8 个 5 秒窗口的总 CPU 中位数 202.4%（200.6 到 223.2），线程 `OS_FFRT_2_1` 和 `Worker` 各约 99 到 100%，常驻内存 763 到 855 MB。与此前的空闲 CPU 记录一致，本轮改动没有改变它，原因仍未查明。
+  - opencode 停在界面不动时，8 个 5 秒窗口的总 CPU 中位数 202.4%（200.6 到 223.2），线程 `OS_FFRT_2_1` 和 `Worker` 各约 99 到 100%，常驻内存 763 到 855 MB。与此前的空闲 CPU 记录一致，本轮改动没有改变它；原因见最上面一节。
   - 应用数据所在分区 465 GB，可用 318 GB，测试文件不占空间问题。
   - opencode 1.19.5 的 ripgrep 查找顺序（读安装的程序文本）：先 `which("rg")`，再 `~/.local/share/opencode/bin/rg`，都没有就从 GitHub 下载 15.1.0，平台键写死为 `arm64-linux`（gnu 版）。本机两处都没有 `rg`；curl 和 Bun 的 `fetch` 访问 GitHub 都报 `self-signed certificate in certificate chain`（本机网络换了证书），即使下载成功，gnu 版也缺 `libpthread.so.0` 跑不起来。Alpine 有 `ripgrep-15.1.0-r0`（同版本）。尚未验证：opencode 的 grep、glob 工具此时是否显示失败，`pkg install ripgrep` 后是否恢复。
 - 未验证：
@@ -104,7 +166,7 @@
   - 只有 `hiperf record --app com.lee.hish` 被允许（`-t` 要求 debug 或 profileable 应用，`-a` 要求 root）；它只采样命令名为 `com.lee.hish` 的进程，所以 opencode 必须直接在提示符下启动，经 `sh 脚本` 或 `exec` 启动的进程名是 `toybox`，采不到。原始数据 `hish-oc-session/oc-perf2.data`（6 秒、12,307 个样本）。
   - 两个热线程各占 50% 周期：约 29% 在 HiSH 的 musl 层 `epoll_pwait` 里，其余在 Bun 事件循环：`EventLoop::tick`、`Timer::drain_timers`、`drain_due_wtf_timers`、`get_timeout`、`us_loop_run_bun_tick`，以及“即将等待”钩子 `Bun__JSC_onBeforeWait` 里 JSC 的垃圾回收步骤 `Collector::runCurrentPhase`（约 10%）。热点里没有 JavaScript 即时编译代码。调用链：`main → cli::start → boot_standalone → Run::start → VirtualMachine::load_entry_point → EventLoop::wait_for_promise → auto_tick → us_loop_run_bun_tick → bun_epoll_pwait2 → epoll_pwait`，Worker 线程同样。
   - 地址转函数名的依据：opencode 内嵌的运行时是 Bun 1.4.4（二进制里有 `Bun/1.4.4`），它的 76,334,736 字节代码段与手机上 `pkg` 装的 Bun 1.4.4、以及 Bun 官方发布的带符号版 `bun-linux-aarch64-musl-profile.zip`（205,042,325 字节）逐字节相同，且程序按链接地址映射，所以采样地址可直接查带符号版。opencode 自己的符号表只有 39KB，不能用。
-  - 解读：两个线程的事件循环都没有真正睡眠（等待超时为 0 或极短），并持续处理定时器；手机上的普通 Bun 进程空闲时不会这样。为什么超时为 0 未确定，尤其未确定是不是 HiSH 造成的。`BUN_JSC_useConcurrentGC=0` 无变化（9 窗中位 202.2%）。
+  - 解读：两个线程的事件循环都没有真正睡眠（等待超时为 0 或极短），并持续处理定时器；手机上的普通 Bun 进程空闲时不会这样。为什么超时为 0 当时未确定；后来查明是 epoll 不执行 `EPOLLONESHOT`，见最上面一节“opencode 空闲 CPU 占满的原因”；HiSH 的装载层没有拦截 epoll。`BUN_JSC_useConcurrentGC=0` 无变化（9 窗中位 202.2%）。
 - 真 git/curl 的运行测试（不是安装）：把 `pkg` 本该装的同一批 16 个 Alpine APK（git 2.52.0-r0、curl 8.23.0-r0 及其依赖）在电脑上解到临时目录（文件链接按副本、目录链接跳过、全程不建链接），传到手机 `~/oc-idle/gitroot` 运行，没有改任何包状态。结果：
   - `git --version` 为 2.52.0，`curl --version` 为 8.23.0，均退出 0。
   - git 本地操作全部退出 0：init、add、commit、log、status、diff、branch、gc、fsck，以及分离的 `--git-dir` 与 `--work-tree`（init、add -A、write-tree），后者是快照类工具的用法。

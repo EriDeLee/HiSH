@@ -28,6 +28,7 @@ pkg doctor --functional --capabilities
 - `pkg list` 显示版本、来源（app-managed / alpine / npm）、配置状态，以及是否只作为依赖安装、链接是否存为副本。
 - `pkg doctor` 只报告状态：当前代次、清单是否已接受、逐文件改动或缺失、未运行的安装脚本。`--functional` 才执行清单中的功能探针；`--capabilities` 才运行符号链接、硬链接、ptrace 和 seccomp 用户通知探针。
 - 安装成功与功能验证分开报告；没有探针的包显示为未验证，不阻止安装。
+- opencode 的 grep 和 glob 工具需要 `rg`。它先找 PATH 里的 `rg` 和 `~/.local/share/opencode/bin/rg`，都没有就从 GitHub 下载 glibc 版；本机网络会替换 GitHub 的证书，下载失败，下载到的 glibc 版也缺 `libpthread.so.0` 跑不起来，结果是 `ripgrep execution failed`。先 `pkg install ripgrep`（Alpine 的 `ripgrep-15.1.0-r0`，与 opencode 要的版本相同），之后这两个工具正常。验证见 [验收](verification.md)。
 
 ## 应用管理的包
 

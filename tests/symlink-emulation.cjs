@@ -78,9 +78,11 @@ test('no layer calls the syscall() it replaces, and the shared logic has one hom
   assert(/add_library\(hish_shell SHARED [^\n]*\blinks_ohos\.c\b/.test(cmake),'links_ohos.c must be part of the shell library');
   assert(/add_library\(hish_links_export OBJECT links_ohos\.c\)/.test(cmake)&&/target_compile_definitions\(hish_links_export PRIVATE [^\n]*HISH_LINKS_EXPORT=1\)/.test(cmake)&&/add_library\(hish_exec_bridge SHARED exec_bridge\.cpp \$<TARGET_OBJECTS:hish_links_export>\)/.test(cmake),'the exported copy must be compiled into the bridge library');
   const build=read(path.join(repo,'scripts/linux/build.cjs'));
-  assert(/linux\/links\.c'\),\s*\n[^\n]*-I'\+path\.join\(repo/.test(build),'build.cjs must compile links.c into the identity library');
-  assert(/linux\/exec\.c'\),path\.join\(repo,'feature\/hish_main\/src\/main\/cpp\/linux\/links\.c'\),'-I'\+path\.join\(repo/.test(build),'build.cjs must compile links.c into the glibc library');
-  assert(build.includes("'linux/links.c','hish_link_core.h','hish_links_impl.h','hish_links_libc.h'"),'the runtime manifest must list the layer as an input');
+  // The compile command of each library is the run([...]) call that ends with the library's name.
+  const command=end=>{const stop=build.indexOf(end);assert(stop>0,end+' is built');return build.slice(build.lastIndexOf("run(['--target=",stop),stop);};
+  assert(command('libhish_linux_identity_padded.so').includes('linux/links.c'),'build.cjs must compile links.c into the identity library');
+  assert(command('libhish_linux_glibc_tty.so').includes('linux/links.c'),'build.cjs must compile links.c into the glibc library');
+  for(const name of ['linux/links.c','hish_link_core.h','hish_links_impl.h','hish_links_libc.h'])assert(build.includes("'"+name+"'"),'the runtime manifest must list '+name+' as an input');
   const exec=read(path.join(cpp,'linux/exec.c'));
   assert(/extern const char\* HishLinkExecutablePath\([^)]*\) __attribute__\(\(weak\)\);/.test(exec)&&/if\(HishLinkExecutablePath\)path=HishLinkExecutablePath\(path,followed,sizeof\(followed\)\);/.test(exec),'exec.c must follow a link before the loader reads the file, and stay linkable without links.c');
 });
