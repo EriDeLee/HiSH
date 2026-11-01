@@ -118,7 +118,7 @@ string(REPLACE "USE_SH(OLDTOY(toysh" "USE_TEST(NEWTOY(test, 0, TOYFLAG_USR|TOYFL
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/newtoys.h" "${TOYBOX_TABLE}")
 file(GLOB TOYBOX_SOURCES "${TOYBOX}/lib/*.c" "${TOYBOX}/toys/*/*.c")
-add_library(hish_shell SHARED shell_module.c mksh_adapter.c toybox_applets.c native_elf.cpp package_manager.cpp proot_loader.cpp "${TOYBOX}/main.c" ${TOYBOX_SOURCES})
+add_library(hish_shell SHARED shell_module.c mksh_adapter.c toybox_adapter.c toybox_applets.c links_ohos.c native_elf.cpp package_manager.cpp proot_loader.cpp "${TOYBOX}/main.c" ${TOYBOX_SOURCES})
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/packages/bootstrap.cmake")
     target_include_directories(hish_shell PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.test/packages")
@@ -167,6 +167,8 @@ if(HISH_ENABLE_DIAGNOSTICS AND EXISTS "${HISH_LINUX_PAYLOAD_DIR}/compiler-data.b
     target_compile_definitions(hish_shell PRIVATE HISH_COMPILER_DATA_VERSION="${HISH_COMPILER_DATA_VERSION}")
 endif()
 set_source_files_properties("${TOYBOX}/main.c" PROPERTIES COMPILE_DEFINITIONS "main=HiSHToyboxMain")
+# xexec() is the only place Toybox starts another program; send it to the loader.
+set_source_files_properties("${TOYBOX}/lib/xwrap.c" PROPERTIES COMPILE_DEFINITIONS "execvp=HiSHToyboxExecvp")
 target_include_directories(hish_shell PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" "${TOYBOX}" "${TOYBOX}/scripts/prereq")
 target_compile_options(hish_shell PRIVATE -Os -funsigned-char -ffunction-sections -fdata-sections -fno-strict-aliasing -include "${CMAKE_CURRENT_SOURCE_DIR}/shell_toybox_options.h")
 target_link_options(hish_shell PRIVATE -Wl,--gc-sections -Wl,-Bsymbolic)
@@ -177,6 +179,14 @@ target_link_libraries(hish_main PUBLIC hish_shell libace_napi.z.so)
 if(HISH_ENABLE_DIAGNOSTICS)
     target_link_libraries(hish_main PRIVATE libchild_process.so libhilog_ndk.z.so)
 endif()
-add_library(hish_exec_bridge SHARED exec_bridge.cpp)
+# The system Toybox applets run with this library preloaded. Besides the exec hooks it
+# carries a second, exported copy of the emulated-link layer (the copy inside hish_shell
+# is hidden), so their stat, open, readlink and the rest see the links.
+add_library(hish_links_export OBJECT links_ohos.c)
+set_target_properties(hish_links_export PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(hish_links_export PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(hish_links_export PRIVATE _GNU_SOURCE HISH_LINKS_EXPORT=1)
+target_compile_options(hish_links_export PRIVATE -Os -fno-strict-aliasing)
+add_library(hish_exec_bridge SHARED exec_bridge.cpp $<TARGET_OBJECTS:hish_links_export>)
 target_link_libraries(hish_exec_bridge PRIVATE hish_shell)
 include(configure_inputs.cmake)

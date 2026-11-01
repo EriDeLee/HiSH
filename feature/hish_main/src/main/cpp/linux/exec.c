@@ -86,7 +86,7 @@ static int load(const char* path, Image* image,int preflight)
     if (image->fd < 0) return -1;
     struct stat info;
     if (fstat(image->fd, &info)) return -1;
-    if (!S_ISREG(info.st_mode) || info.st_size < (off_t)sizeof(Elf64_Ehdr) || info.st_size > 128 * 1024 * 1024) return error(ENOEXEC);
+    if (!S_ISREG(info.st_mode) || info.st_size < (off_t)sizeof(Elf64_Ehdr) || info.st_size > 512 * 1024 * 1024) return error(ENOEXEC);
     if (read_exact(image->fd, &image->eh, sizeof(image->eh), 0)) return -1;
     const Elf64_Ehdr* eh = &image->eh;
     if (memcmp(eh->e_ident, ELFMAG, SELFMAG) || eh->e_ident[EI_CLASS] != ELFCLASS64 || eh->e_ident[EI_DATA] != ELFDATA2LSB ||
@@ -122,7 +122,7 @@ static int load(const char* path, Image* image,int preflight)
             if (begin < b && end > a) return error(ENOEXEC);
         }
     }
-    if (!executable_entry || high <= low || high - low > 256 * 1024 * 1024) return error(ENOEXEC);
+    if (!executable_entry || high <= low || high - low > 512 * 1024 * 1024) return error(ENOEXEC);
     image->size = high - low;
     if (eh->e_type == ET_EXEC&&!preflight) {
         void* memory = mmap((void*)low, image->size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
@@ -389,11 +389,16 @@ static int application_shell(const char* path)
     const char* prefix=getenv("PREFIX");
     return prefix&&!strncmp(path,prefix,strlen(prefix))&&!strncmp(path+strlen(prefix),"/bin/",5);
 }
+// Present only in the musl library (links.c); a link used as a program is followed
+// before the loader reads it.
+extern const char* HishLinkExecutablePath(const char* path, char* buffer, size_t capacity) __attribute__((weak));
 int execve(const char* path, char* const argv[], char* const envp[])
 {
     // PRoot owns translation and the kernel-exec handoff for its tracees.
     const char* proot=getenv("HISH_PROOT_ACTIVE");if(proot&&!strcmp(proot,"1"))return syscall(SYS_execve,path,argv,envp);
     path=HishExecutablePath(path);
+    char followed[PATH_MAX];
+    if(HishLinkExecutablePath)path=HishLinkExecutablePath(path,followed,sizeof(followed));
     // Even if another firmware permits /bin/sh, it must not silently replace
     // the selected application shell with the system shell.
     if(application_shell(path))return routed(path,argv,envp);

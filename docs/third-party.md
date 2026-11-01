@@ -29,6 +29,10 @@ APK/libapk 3.0.8、OpenSSL 3.5.9、zlib 1.3.2、Alpine 公钥及 CA bundle 来�
 
 PRoot 平台端口基于 `25dc6a3134891f98a79f57ce1c2c1b23ff15cad1`，GPL-2.0-or-later；按需安装的编译产物和探针位于自举。固定归档、uthash、talloc/构建头文件摘要见 `scripts/packages/proot-lock.json`，补丁逻辑及适配源文件见同目录构建脚本和 `proot/`。talloc 动态依赖由 Alpine 安装，未静态链接进端口。
 
+## 改编的 musl 函数
+
+`feature/hish_main/src/main/cpp/hish_links_libc.h` 中的 `scandir`、`glob`/`globfree`、`nftw`、`ftw` 改编自 musl 1.2.5 的 `src/dirent/scandir.c`、`src/regex/glob.c`、`src/misc/nftw.c`、`src/legacy/ftw.c`，MIT 许可，Copyright (c) 2005-2020 Rich Felker 等，许可全文在该头文件开头。改动是把文件系统调用换成符号链接模拟层的函数，并让 `glob` 进入作为目录链接的小文件；与未改动源码的逐字节对照见 [符号链接](symlinks.md)。这些代码随 `libhish_linux_identity_padded.so`（及 scandir 随 glibc 预加载库）交付，许可文本的交付与上文 musl 运行库属同一项待办。
+
 ## 备用但不交付
 
 mrsh 源码及 MIT 许可、原生探针和实验加载器保留。闲置 WebGL 插件位于 `third_party/xterm-optional/`；与 Git 原件在规范化换行后全文相同，原始摘要不同。

@@ -87,10 +87,11 @@ fs.writeFileSync(path.join(output,'libgcc_s1.so'),separateHeader(unwindPadded));
 const diagnosticFlags=diagnostics?['-DHISH_ENABLE_DIAGNOSTICS=1']:[];
 run(['--target=aarch64-linux-musl','--sysroot='+musl,...diagnosticFlags,'-fuse-ld=lld','-nostdlib','-O2','-fPIC','-shared','-Wl,-z,max-page-size=4096',
  path.join(repo,'feature/hish_main/src/main/cpp/linux/identity.c'),path.join(repo,'feature/hish_main/src/main/cpp/linux/terminal.c'),path.join(repo,'feature/hish_main/src/main/cpp/linux/exec.c'),
+ path.join(repo,'feature/hish_main/src/main/cpp/linux/links.c'),
   '-I'+path.join(repo,'feature/hish_main/src/main/cpp'),'-I'+path.join(musl,'usr/include'),path.join(musl,'lib/libc.musl-aarch64.so.1'),
    path.join(sdk,'llvm/lib/clang/15.0.4/lib/aarch64-linux-ohos/libclang_rt.builtins.a'),'-o',path.join(output,'libhish_linux_identity_padded.so')]);
 run(['--target=aarch64-linux-gnu','--sysroot='+glibc,...diagnosticFlags,'-fuse-ld=lld','-nostdlib','-O2','-fPIC','-shared','-Wl,-z,max-page-size=4096',
- path.join(repo,'feature/hish_main/src/main/cpp/linux/terminal.c'),path.join(repo,'feature/hish_main/src/main/cpp/linux/exec.c'),'-I'+path.join(repo,'feature/hish_main/src/main/cpp'),
+ path.join(repo,'feature/hish_main/src/main/cpp/linux/terminal.c'),path.join(repo,'feature/hish_main/src/main/cpp/linux/exec.c'),path.join(repo,'feature/hish_main/src/main/cpp/linux/links.c'),'-I'+path.join(repo,'feature/hish_main/src/main/cpp'),
  '-I'+path.join(glibc,'usr/include'),'-I'+path.join(glibc,'usr/include/aarch64-linux-gnu'),'-idirafter',path.join(sdk,'sysroot/usr/include'),'-idirafter',path.join(sdk,'sysroot/usr/include/aarch64-linux-ohos'),
   path.join(lib,'libc.so.6'),path.join(lib,'libc_nonshared.a'),path.join(sdk,'llvm/lib/clang/15.0.4/lib/aarch64-linux-ohos/libclang_rt.builtins.a'),'-o',path.join(output,'libhish_linux_glibc_tty.so')]);
 if(diagnostics)for(const family of ['musl','glibc']){
@@ -164,7 +165,7 @@ console.log('built native relocatable TinyCC from pinned source');
 }
 const cpp=path.join(repo,'feature/hish_main/src/main/cpp');
 const inputs=[...sourceRuntime.inputs.map(([name])=>path.join(cpp,name)),
- ...['linux/identity.c','linux/terminal.c','linux/exec.c','native_tools.h','linux_library_path.h','elf_execution_access.h','process_identity.h','shell_script.h','exec_bridge_shared.h','hish_tty_shared.h',...(diagnostics?['linux/tcc_main.c']:[])].map(name=>path.join(cpp,name)),__filename,path.join(__dirname,'source-runtime.cjs'),path.join(__dirname,'../daily-package-policy.json')];
+ ...['linux/identity.c','linux/terminal.c','linux/exec.c','linux/links.c','hish_link_core.h','hish_links_impl.h','hish_links_libc.h','native_tools.h','linux_library_path.h','elf_execution_access.h','process_identity.h','shell_script.h','exec_bridge_shared.h','hish_tty_shared.h',...(diagnostics?['linux/tcc_main.c']:[])].map(name=>path.join(cpp,name)),__filename,path.join(__dirname,'source-runtime.cjs'),path.join(__dirname,'../daily-package-policy.json')];
 if(!diagnostics){
  const expected=require('../daily-package-policy.json').arm64Runtime;
  const actual=fs.readdirSync(output).filter(name=>name.endsWith('.so')).sort();

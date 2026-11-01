@@ -5,7 +5,7 @@
 从仓库根执行；测试使用已有 SDK 和缓存，在 `.test` 写隔离输出，不安装工具：
 
 ```cmd
-node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs tests/package-core.cjs tests/elf-dormant-heap.cjs
+node --test tests/mksh-integration.cjs tests/daily-packaging.cjs tests/package-inventory.cjs tests/signed-packaging.cjs tests/base-distribution.cjs tests/repository-hygiene.cjs tests/source-runtime.cjs tests/daily-appearance.cjs tests/musl-source.cjs tests/package-manager.cjs tests/package-core.cjs tests/elf-dormant-heap.cjs tests/toybox-exec.cjs tests/symlink-emulation.cjs
 node tests/native-session.cjs
 node tests/terminal-codec.cjs
 git diff --check
@@ -26,6 +26,26 @@ node scripts/inspect-daily-hap.cjs PATH_TO_HAP PATH_TO_SELECTED_PAYLOADS
 SDK 的 `ets/sourceMaps.map` 只允许该位置，禁止 sourcesContent，来源必须匹配当前 18 个 ArkTS 模块记录。不能因为菜单关闭就断言其代码未编入。
 
 签名后以已核验的未签名包为基准：原公共条目内容必须一致，只允许签名工具新增 `.pages.info`，不读取其内容。`compareSigned` 检查此边界；未签名包检查仍拒绝额外条目。新增代码、变更原代码/元数据、缺失原条目均有失败测试。
+
+## 符号链接的设备检查
+
+主机测试只编译并运行共享的解析代码，C 库层必须在手机上验证。`scripts/linux/link-check-build.cjs` 把 `tests/fixtures/linux_links.c` 编成 musl 和 glibc 两个程序（`--reference` 另编一份用未改动 musl 源码的对照）：
+
+```cmd
+node scripts/linux/link-check-build.cjs NEW_OUTPUT_DIR NATIVE_SDK --reference .test/linux-tools/musl-source-build/HASH/source
+```
+
+把程序送进应用的 home，`chmod 700` 后在终端运行：
+
+```sh
+./linux_links_musl DIR            # DIR 不存在；musl 应为 47 项通过
+./linux_links_glibc DIR           # glibc 应为 32 项通过（glob、nftw、ftw 跳过）
+./linux_links_musl --ab TREE      # 在不含链接的目录树上打印 scandir、glob、nftw、ftw 的结果
+HISH_LINKS=0 ./linux_links_musl --ab TREE
+./linux_links_musl_orig --ab TREE
+```
+
+三份 `--ab` 输出在不含链接的树上必须逐字节相同；树里有目录链接时，开着与关着的输出必须不同，这证明 `HISH_LINKS=0` 真的回到了 C 库自己的函数。系统命令用 `find`、`stat`、`cp`、`mv`、`touch`、`tar` 等在含链接的目录里对照 `HISH_LINKS=0` 的结果。
 
 ## 手机复验
 

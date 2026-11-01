@@ -7,6 +7,10 @@ WebTerminal → NativeTerminalSession → NAPI 异步任务
 
 会话的 HOME、PREFIX、TMPDIR 分别位于应用 `files/native/{home,usr,tmp}`。环境和工作目录只在子进程设置，不修改 UI 进程。保留已有用户文件、历史、字体及背景。
 
+Linux 程序写死的 `/etc/ssl/certs/ca-certificates.crt` 在本机不存在。会话启动时，若 pkg 自举目录里有 CA 包（`native/packages/bootstrap-摘要/etc/ssl/certs/ca-certificates.crt`，即 pkg 校验自己下载所用的那份），就把 `SSL_CERT_FILE`、`CURL_CA_BUNDLE`、`GIT_SSL_CAINFO` 指向它；已设置的值不覆盖。curl 读前两个之一，git 只读 `GIT_SSL_CAINFO`。
+
+Alpine 的 git 到 `/usr` 下找辅助程序和模板，本机没有这个目录。会话启动时，若当前代次有 `usr/libexec/git-core` 和 `usr/share/git-core/templates`，就设置 `GIT_EXEC_PATH` 和 `GIT_TEMPLATE_DIR`，已设置的值不覆盖。`pkg` 函数把本窗口切到新代次时同步更新：值为空或指向旧代次时重设，新代次没有 git 就取消；用户自己设的值不动。
+
 ## 通道和输入
 
 原生会话先尝试内核 PTY；已测手机返回拒绝时使用 socket 字节通道和共享终端状态。共享状态保存窗口大小、termios、前台组和输入控制字符；UI 按 VINTR/VQUIT/VSUSP 发送相应信号。它不能替代完整内核行规程或嵌套 PTY。

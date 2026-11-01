@@ -5,10 +5,31 @@
 #define HISH_ELF_DIAGNOSTICS_ENV "HISH_MUSL_DSO_DIAGNOSTICS"
 #include "elf_code_mapping.h"
 #include <elf.h>
+#include <limits.h>
 #include <sys/stat.h>
 
 // Included only by the source-built Linux musl ldso, after its early bootstrap.
 // The upstream linker still owns symbols, relocations, TLS and constructors.
+static int HishMuslPathWithin(const char* path, const char* root)
+{
+    const size_t size = strlen(root);
+    return size && !strncmp(path, root, size) && (!path[size] || path[size] == '/');
+}
+// "libc.so" names the OHOS libc, but it is also musl's canonical name, which
+// this loader resolves to itself like upstream musl. A DSO needing it is foreign
+// only where OHOS ABI libraries live: the HAP's libraries and everything outside
+// app storage. An origin that cannot be read keeps the refusal.
+static int HishMuslDSOFromOhos(int fd)
+{
+    char link[32], path[PATH_MAX];
+    snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
+    const ssize_t n = readlink(link, path, sizeof path - 1);
+    if (n <= 0) return 1;
+    path[n] = 0;
+    const char* libraries = getenv("HISH_NATIVE_LIBDIR");
+    return (libraries && *libraries == '/' && HishMuslPathWithin(path, libraries)) ||
+        HishMuslPathWithin(path, "/data/storage/el1/bundle") || !HishMuslPathWithin(path, "/data/storage");
+}
 static int HishMuslDSOHeader(int fd, const Elf64_Ehdr* eh)
 {
     struct stat info;
@@ -41,7 +62,7 @@ static int HishMuslDSOContains(const Elf64_Phdr* ph, size_t count, uint64_t addr
         bytes <= ph[i].p_filesz - (address - ph[i].p_vaddr)) return 1;
     return 0;
 }
-static int HishMuslDSODynamic(const unsigned char* base, const Elf64_Phdr* ph, size_t count)
+static int HishMuslDSODynamic(const unsigned char* base, const Elf64_Phdr* ph, size_t count, int fd)
 {
     const Elf64_Phdr* dynamic = NULL;
     for (size_t i = 0; i < count; i++) if (ph[i].p_type == PT_DYNAMIC) {
@@ -67,8 +88,8 @@ static int HishMuslDSODynamic(const unsigned char* base, const Elf64_Phdr* ph, s
         if (!memchr(name, 0, stringSize - offset)) { errno = ENOEXEC; return -1; }
         // Detect explicit foreign libc dependencies before any relocations or
         // constructors. This is not a proof that every other DSO has a musl ABI.
-        if (!strcmp(name, "libc.so.6") || !strcmp(name, "ld-linux-aarch64.so.1") ||
-            !strcmp(name, "libc.so") || !strcmp(name, "libc++.so")) { errno = ELIBBAD; return -1; }
+        if (!strcmp(name, "libc.so.6") || !strcmp(name, "ld-linux-aarch64.so.1") || !strcmp(name, "libc++.so") ||
+            (!strcmp(name, "libc.so") && HishMuslDSOFromOhos(fd))) { errno = ELIBBAD; return -1; }
     }
     return 0;
 }
@@ -133,7 +154,7 @@ static int HishMuslMapDSO(int fd, const Elf64_Ehdr* eh, const Elf64_Phdr* ph, si
         }
     }
     stage = "validate DSO dynamic table/libc";
-    if (HishMuslDSODynamic(base, ph, eh->e_phnum)) goto fail;
+    if (HishMuslDSODynamic(base, ph, eh->e_phnum, fd)) goto fail;
     *mapping = (unsigned char*)aligned; *mapSize = length; *loadBase = base;
     if (getenv("HISH_MUSL_DSO_DIAGNOSTICS")) dprintf(2, "HISH_MUSL_DSO_MAPPED address=%p size=%zu\n", (void*)aligned, length);
     return 0;

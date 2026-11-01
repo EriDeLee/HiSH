@@ -34,6 +34,7 @@ function world(label){
  add('plain','1.0-r0',{files:[{name:'usr/bin/plain',bytes:'plain v1'},{name:'usr/bin/plain-link',type:'2',link:'plain'},{name:'etc/plain.conf',bytes:'default config\n'}],scripts:{'.post-install':'#!/bin/sh\nadduser -S plain\n'}});
  add('libc6compat','1.0-r0',{files:[{name:'usr/lib/libcompat.so',bytes:'compat'}]});
  add('dirlink','1.0-r0',{files:[{name:'usr/share/real/x',bytes:'x'},{name:'usr/share/alias',type:'2',link:'real'}]});
+ add('bigprog','1.0-r0',{files:[{name:'usr/bin/prog',bytes:'p'.repeat(70000)},{name:'usr/bin/prog-alias',type:'2',link:'prog'},{name:'usr/lib/libthing.so.1.0',bytes:'l'.repeat(70000)},{name:'usr/lib/libthing.so.1',type:'2',link:'libthing.so.1.0'},{name:'usr/share/data.bin',bytes:'d'.repeat(70000),mode:'0000644'},{name:'usr/share/data-alias',type:'2',link:'data.bin'},{name:'usr/bin/small',bytes:'tiny'},{name:'usr/bin/small-alias',type:'2',link:'small'}]});
  const toolx=Buffer.from('local toolx v1');fs.writeFileSync(path.join(payloads,'toolx-v1'),toolx);
  const tgz=tar([{name:'package/bin/runtime',bytes:'runtime 2.0.0'},{name:'package/package.json',bytes:'{}'}]);
  fs.writeFileSync(path.join(rep,'npm/runtime-2.0.0.tgz'),tgz);fs.writeFileSync(path.join(rep,'npm/runtime-2.0.0.tgz.sha512'),sha512(tgz).digest('hex'));
@@ -94,6 +95,19 @@ test('upgrade, update and unrelated changes keep the installed app-managed bytes
  assert(!fs.existsSync(path.join(w.active(),'usr/bin/newtool')),'migration must not install packages that were not installed');
  assert.equal(w.pkg(['pending']).stdout.trim(),'accepted');w.ok(['install','plain']);
 });
+test('a migration error left by an older app version is dropped once nothing is pending',()=>{
+ const w=world('stale-error');w.ok(['install','toolx'],{HISH_TEST_OFFLINE:'1'});
+ const file=path.join(w.base,'state','migration-error');fs.mkdirSync(path.dirname(file),{recursive:true});
+ fs.writeFileSync(file,'read /old/bootstrap-0123/talloc-2.4.3-r0.apk\n');
+ assert.equal(w.pkg(['pending']).stdout.trim(),'accepted');
+ assert.doesNotMatch(w.ok(['doctor']),/last migration error/,'an obsolete record must not be reported');
+ assert(fs.existsSync(file),'doctor only reports, it never edits state');
+ w.ok(['migrate'],{HISH_TEST_OFFLINE:'1'});assert(!fs.existsSync(file),'the session-start migration removes the obsolete record');
+ // While a migration really is pending, the record still says why, on one line.
+ w.manifest.local[0].version='2.0-hish';fs.writeFileSync(w.mfile,JSON.stringify(w.manifest));
+ assert.equal(w.pkg(['pending']).stdout.trim(),'pending');fs.writeFileSync(file,'could not read payload\n');
+ const pending=w.ok(['doctor']);assert.match(pending,/\(migration pending\)\r?\nlast migration error: could not read payload\r?\nlinks:/);
+});
 test('removing a package keeps app-managed dependencies still needed, offline',()=>{
  const w=world('remove');w.ok(['install','toolx','hello']);
  const out=w.ok(['remove','toolx'],{HISH_TEST_OFFLINE:'1'});assert.match(out,/removed toolx/);
@@ -108,7 +122,29 @@ test('install scripts are recorded as not run and the package is marked unconfig
  assert(!fs.lstatSync(path.join(w.active(),'usr/bin/plain-link')).isSymbolicLink());assert.equal(w.file('usr/bin/plain-link'),'plain v1');
  assert.match(w.ok(['list']),/plain\t1\.0-r0\talpine\tunconfigured\tlinks-copied:1/);
  const doctor=w.ok(['doctor']);assert.match(doctor,/plain 1\.0-r0: alpine, unconfigured, 1 links stored as copies \(\.post-install not run/);
- const r2=w.pkg(['install','dirlink'],{HISH_TEST_LINKS:'copy'});assert.notEqual(r2.status,0);assert.match(r2.stderr,/unsupported directory symlink: usr\/share\/alias; transaction not activated/);
+});
+test('a link to a sizeable program becomes an emulated link; library, data and small-program links stay copies',()=>{
+ const w=world('proglink');
+ w.ok(['install','bigprog'],{HISH_TEST_LINKS:'copy'});
+ assert.equal(w.file('usr/bin/prog-alias'),'!<hish-symlink>prog','a link to a 70 KB program is a marker');
+ assert.equal(w.file('usr/lib/libthing.so.1'),'l'.repeat(70000),'ld.so cannot follow a marker, so a library link stays a copy');
+ assert.equal(w.file('usr/share/data-alias'),'d'.repeat(70000),'a link to a data file stays a copy');
+ assert.equal(w.file('usr/bin/small-alias'),'tiny','a link to a small program stays a copy');
+ assert.match(w.ok(['list'],{HISH_TEST_LINKS:'copy'}),/bigprog\t1\.0-r0\talpine\tconfigured\tlinks-copied:3/);
+ w.ok(['install','plain'],{HISH_TEST_LINKS:'copy'});
+ assert.equal(w.file('usr/bin/prog-alias'),'!<hish-symlink>prog','the marker survives into the next generation');
+ assert.equal(w.file('usr/bin/prog'),'p'.repeat(70000));
+});
+test('a directory link becomes an emulated link marker where symlinks are refused, and survives later generations',()=>{
+ const w=world('dirlink'),marker='!<hish-symlink>real';
+ w.ok(['install','dirlink'],{HISH_TEST_LINKS:'copy'});
+ assert.equal(w.file('usr/share/alias'),marker,'the link is a marker file holding the relative target');
+ assert.equal(w.file('usr/share/real/x'),'x');assert(!fs.lstatSync(path.join(w.active(),'usr/share/alias')).isSymbolicLink());
+ w.ok(['install','plain'],{HISH_TEST_LINKS:'copy'});
+ assert.equal(w.file('usr/share/alias'),marker,'a package carried into the next generation keeps its marker');
+ assert.match(w.ok(['doctor'],{HISH_TEST_LINKS:'copy'}),/dirlink 1\.0-r0: alpine, configured/);
+ w.ok(['remove','dirlink'],{HISH_TEST_LINKS:'copy'});
+ assert(!fs.existsSync(path.join(w.active(),'usr/share/alias')),'removing the package removes the marker');
 });
 test('a user-modified file is kept and the new bytes are saved beside it',()=>{
  const w=world('modified');w.ok(['install','plain']);

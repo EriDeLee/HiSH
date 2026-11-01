@@ -1,4 +1,5 @@
 #pragma once
+#include "hish_link_core.h"
 #include "package_util.h"
 #include <zlib.h>
 #include <algorithm>
@@ -46,6 +47,15 @@ inline std::string SafeName(const std::string& name) {
     return name;
 }
 inline void WriteMode(const fs::path& dest, unsigned mode) { fs::permissions(dest,fs::perms(mode&0777),fs::perm_options::replace); }
+// Where the device refuses symlinks, a directory link cannot be stored as a copy. It becomes
+// the emulated marker of hish_link_core.h, which HiSH's Linux layer shows as a link. The
+// sticky bit is the flag, so this is the one place that sets special mode bits.
+inline void WriteLinkMarker(const fs::path& dest, const std::string& target) {
+    std::string bytes(HISH_LINK_MAGIC_LENGTH+target.size(),'\0');
+    const size_t size=HishLinkFormat(target.data(),target.size(),&bytes[0]); if(!size)throw std::runtime_error("unusable link target: "+target);
+    { std::ofstream out(dest,std::ios::binary|std::ios::trunc); out.write(bytes.data(),static_cast<std::streamsize>(size)); out.close(); if(!out)throw std::runtime_error("write link marker "+dest.string()); }
+    fs::permissions(dest,fs::perms(HISH_LINK_MODE),fs::perm_options::replace);
+}
 inline void Write(const fs::path& root, const std::string& name, const unsigned char* bytes, size_t size, unsigned mode) {
     auto dest=root/SafeName(name); fs::create_directories(dest.parent_path());
     // Roots are fresh private generations; symlinks are only created after every file.
@@ -91,7 +101,7 @@ struct Extractor {
     fs::path root; std::vector<Link> links; LinkMode linkMode=LinkMode::Copy;
     std::map<std::string,std::vector<OwnedFile>> owned;
     std::map<std::string,std::map<std::string,std::string>> scripts;
-    std::map<std::string,unsigned> copiedLinks, realLinks;
+    std::map<std::string,unsigned> copiedLinks, realLinks, fileModes;
     std::string lastOwner;
     explicit Extractor(fs::path directory,LinkMode mode=LinkMode::Copy):root(std::move(directory)),linkMode(mode){}
     static std::string MetaValue(const std::string& metadata,const std::string& key) {
@@ -128,7 +138,7 @@ struct Extractor {
                     std::string dir=name; while(dir.size()>1&&dir.back()=='/')dir.pop_back();
                     fs::create_directories(root/dir);owned[owner].push_back({dir,"D",mode});
                 }
-                else if(type=='0'||type==0){Write(root,name,data,size,mode);owned[owner].push_back({name,Sha256Hex(data,size),mode});}
+                else if(type=='0'||type==0){Write(root,name,data,size,mode);owned[owner].push_back({name,Sha256Hex(data,size),mode});fileModes[name]=mode;}
                 else if(type=='1'||type=='2') {
                     Require(!target.empty()&&target.find('\0')==std::string::npos&&target.find('\\')==std::string::npos,"empty or unsafe package link");
                     // Hard-link targets are archive-root paths; symlink targets stay raw and are resolved against the final tree.
@@ -140,8 +150,22 @@ struct Extractor {
         }
         Require(!requireMetadata||!metadata.empty(),"missing APK metadata");lastOwner=owner;return metadata;
     }
+    // A link to a sizeable program can be an emulated link instead of a copy: HiSH's loaders
+    // follow it when they start the program (git alone has 148 such links to a 3 MB binary).
+    // A library link must stay a copy because ld.so cannot see the emulation when it loads one,
+    // and a data file may be read by code that cannot see it either.
+    static constexpr uintmax_t kProgramLinkMinimum=64*1024;
+    static bool LibraryName(const std::string& path) {
+        const std::string base=fs::path(path).filename().string();
+        return base.find(".so.")!=std::string::npos||(base.size()>3&&base.compare(base.size()-3,3,".so")==0);
+    }
+    bool ProgramLink(const std::string& link,const std::string& target) const {
+        const auto mode=fileModes.find(target); std::error_code ec;
+        return mode!=fileModes.end()&&(mode->second&0111)&&!LibraryName(link)&&!LibraryName(target)&&fs::file_size(root/target,ec)>=kProgramLinkMinimum&&!ec;
+    }
     // Resolve every link against the final tree. Copy mode produces exact file
-    // copies; real mode creates symlinks after all regular files exist.
+    // copies, except for directory links and links to sizeable programs, which become
+    // emulated links; real mode creates symlinks after all regular files exist.
     void MaterializeLinks() {
         std::map<std::string,std::string> symlinks;
         for(const auto& l:links)if(!l.hard)symlinks[l.name]=l.target;
@@ -158,7 +182,7 @@ struct Extractor {
             }
             const auto target=root/at;
             if(fs::is_directory(target)) {
-                Require(linkMode==LinkMode::Real&&!l.hard,"unsupported directory symlink: "+l.name);
+                Require(!l.hard,"unsupported directory hard link: "+l.name);
             } else Require(fs::is_regular_file(target),"unresolved or non-file package link: "+l.name);
         }
         for(const auto& l:pending) {
@@ -168,10 +192,11 @@ struct Extractor {
             const auto target=root/at,dest=root/l.name;
             Require(!fs::exists(dest)&&!fs::is_symlink(dest),"duplicate archive file: "+l.name);
             fs::create_directories(dest.parent_path());
-            if(linkMode==LinkMode::Real&&!l.hard) {
+            if(!l.hard&&(linkMode==LinkMode::Real||fs::is_directory(target)||ProgramLink(l.name,at))) {
                 std::string relative=fs::path(at).lexically_relative(fs::path(l.name).parent_path()).generic_string();
                 Require(!relative.empty(),"link target");
-                fs::create_symlink(relative,dest);owned[l.owner].push_back({l.name,"L:"+relative,l.mode});realLinks[l.owner]++;
+                if(linkMode==LinkMode::Real)fs::create_symlink(relative,dest);else WriteLinkMarker(dest,relative);
+                owned[l.owner].push_back({l.name,"L:"+relative,l.mode});realLinks[l.owner]++;
             } else {
                 auto bytes=Read(target);Write(root,l.name,bytes.data(),bytes.size(),static_cast<unsigned>(fs::status(target).permissions())&0777);
                 owned[l.owner].push_back({l.name,Sha256Hex(bytes.data(),bytes.size()),static_cast<unsigned>(fs::status(target).permissions())&0777});copiedLinks[l.owner]++;

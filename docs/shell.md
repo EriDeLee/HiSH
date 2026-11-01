@@ -8,6 +8,12 @@ mksh 以 OBJECT 编入 `libhish_shell.so`，固定 51 份上游文件并逐份�
 
 内置 Toybox 仅提供已有基础工具子集，不含 Toybox shell。构建目录生成 printf/sleep/test 命令表覆盖，不改下载源码。系统工具在命令子进程中执行 Toybox `--long` 探测；列出名字不代表其权限或功能通过。
 
+内嵌 Toybox 里会启动其他程序的只有 `xargs`，它经 `xexec()` 启动。构建把该文件里的 `execvp` 改名为 `toybox_adapter.c` 的 `HiSHToyboxExecvp`：按 PATH 顺序查找（规则同 execvp，实现在 `toybox_exec_path.h`），再交给 mksh 用的同一个装载入口 `HiSHExecFile`，所以 `xargs` 能启动随包 Linux 程序；此前直接调用系统 execvp，报 `Permission denied`。`tests/toybox-exec.cjs` 确认 Toybox 源码里只有 xexec 一处启动程序，并在主机上运行查找函数。
+
+`env`、`timeout`、`nice`、`nohup`、`setsid`、`taskset`、`time` 和 `find` 不在内嵌子集里，由系统 `/system/bin/toybox` 提供。它们的 `execvp`/`execve` 来自系统 libc，单靠它们启动不了随包 Linux 程序。`HiSHRunApplet` 让每个系统小程序都带着 HiSH 的预加载库启动系统 Toybox，由该库的 `execvp`、`execve`、`vfork` 进入 HiSH 装载器，机制见 [ELF 兼容层](elf-runtime.md)。预加载使每次系统小程序启动多约 20 毫秒。mksh 自带关键字 `time`。
+
+符号链接：内置 Toybox 的 `ln -s`、`ls -l`、`readlink`、`cat`、`rm`，mksh 的 `cd`、`pwd -P`、`test -L`、`realpath`、命令查找与直接执行，以及全部系统 Toybox 命令（`stat`、`find`、`cp`、`mv`、`touch`、`du`、`file`、`tar` 等）对模拟链接生效。机制和范围见 [符号链接](symlinks.md)。
+
 `hish-tools` 说明底座范围，不是普通软件仓库，也不再罗列 Git 内部 helpers。查询已安装命令使用 `command -v NAME` 或 `whence NAME`；软件交付归属见 [交付边界](distribution.md)。
 
 ## 旧转发脚本

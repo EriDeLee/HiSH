@@ -88,7 +88,11 @@ struct Transaction {
         for(const auto& f:it->second) {
             const fs::path dest=stage/f.path;
             if(f.sha256=="D"){fs::create_directories(dest);continue;}
-            if(f.sha256.rfind("L:",0)==0){fs::create_directories(dest.parent_path());Require(!fs::exists(dest)&&!fs::is_symlink(dest),"file conflict: "+f.path);fs::create_symlink(f.sha256.substr(2),dest);continue;}
+            if(f.sha256.rfind("L:",0)==0){
+                fs::create_directories(dest.parent_path());Require(!fs::exists(dest)&&!fs::is_symlink(dest),"file conflict: "+f.path);
+                if(caps.symlink)fs::create_symlink(f.sha256.substr(2),dest);else WriteLinkMarker(dest,f.sha256.substr(2));
+                continue;
+            }
             const fs::path src=s.root/f.path;
             Require(fs::is_regular_file(src),"installed file of "+name+" is missing: "+f.path+"; remove and reinstall the package");
             if(HashFile(src.string())!=f.sha256)messages.push_back(name+": modified file kept: "+f.path);
@@ -385,9 +389,11 @@ inline bool Migrate(Context& c,std::string& error) {
     try {
         ImportLegacy(c);
         for(const auto& note:c.store.Recover())Say("pkg: "+note);
-        if(!MigrationPending(c)){WriteText(AcceptedFile(c),c.manifestSha+"\n");return true;}
+        std::error_code ec;
+        // An error recorded by an earlier app version is obsolete once nothing is pending.
+        if(!MigrationPending(c)){WriteText(AcceptedFile(c),c.manifestSha+"\n");fs::remove(c.StateDir()/"migration-error",ec);return true;}
         const State s=LoadState(c.store); Plan p; p.world=s.world; p.migration=true; p.offline=true;
-        Commit(c,p); WriteText(AcceptedFile(c),c.manifestSha+"\n"); std::error_code ec; fs::remove(c.StateDir()/"migration-error",ec);
+        Commit(c,p); WriteText(AcceptedFile(c),c.manifestSha+"\n"); fs::remove(c.StateDir()/"migration-error",ec);
         return true;
     } catch(const std::exception& e) {
         error=e.what(); WriteText(c.StateDir()/"migration-error",error+"\n"); return false;

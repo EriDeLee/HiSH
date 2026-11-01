@@ -9,7 +9,10 @@
       "member": "package/bin/bun",
       "install": "usr/bin/bun",
       "alpineDependencies": ["libstdc++"],
-      "extra": [{"path": "usr/bin/bunx", "content": "#!/bin/sh\nexec bun x \"$@\"\n", "mode": 448}]
+      "extra": [
+        {"path": "usr/bin/bunx", "content": "#!/bin/sh\nexec bun x \"$@\"\n", "mode": 448},
+        {"path": "bin/node", "content": "#!/bin/sh\nexec -a node bun \"$@\"\n", "mode": 448}
+      ]
     }
   ]
 }

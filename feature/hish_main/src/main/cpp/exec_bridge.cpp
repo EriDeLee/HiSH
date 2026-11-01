@@ -1,5 +1,6 @@
 #include "exec_bridge_shared.h"
 #include "native_elf.h"
+#include "system_applet_env.h"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -12,8 +13,23 @@ __attribute__((noreturn)) static void InvalidRequest(const char* stage)
 {
     dprintf(2,"HiSH exec bridge request: %s errno=%d\n",stage,errno);_exit(126);
 }
+// A system Toybox applet started by HiSHExecSystemApplet runs with this library
+// preloaded. Its startup settings are removed here; the three functions below take
+// effect once its own main runs. The system libc cannot start a Linux ELF, so the
+// applet's execvp and execve (env searches PATH itself and calls execve) go to
+// HiSH's loader, which still hands OHOS programs to the kernel. A vfork child
+// shares its parent's memory, which the loader would rewrite, so vfork becomes
+// fork. HiSH's own code reaches the kernel with a raw syscall, never through these.
+// The library also carries the exported emulated-link layer (links_ohos.c): stat, open,
+// readlink and the other path functions of the applet see the links. That layer is
+// switched on below, only for a system applet, and passes every call through otherwise.
+extern "C" __attribute__((visibility("default"))) int execvp(const char* file,char* const argv[]){return HiSHToyboxExecvp(file,argv);}
+extern "C" __attribute__((visibility("default"))) int execve(const char* path,char* const argv[],char* const envp[]){return HiSHMkshExecve(path,argv,envp);}
+extern "C" __attribute__((visibility("default"))) pid_t vfork(void){return fork();}
+extern "C" void HishLinksEnableForApplet(void);
 __attribute__((constructor)) static void EnterRequestedImage()
 {
+    if(getenv(HISH_SYSTEM_APPLET_MARKER)){HishRestoreSystemAppletEnvironment(environ);HishLinksEnableForApplet();return;}
     if(const char* script=getenv("HISH_PROOT_SCRIPT"))HiSHEnterPRootImage(script);
     const char* value=getenv("HISH_EXEC_BRIDGE_FD");if(!value)return;
     const bool diagnostic=getenv("HISH_SPAWN_DIAGNOSTICS")!=nullptr;

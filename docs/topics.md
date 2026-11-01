@@ -6,6 +6,7 @@
 | HAP 与未来软件包的责任边界 | [软件交付](distribution.md) |
 | 会话、监督进程、退出回收 | [进程生命周期](process-lifecycle.md) |
 | ELF 装载、exec 桥和两套 libc | [执行兼容层](elf-runtime.md) |
+| 符号链接模拟：格式、覆盖范围、盲点 | [符号链接](symlinks.md) |
 | mksh、脚本、工具入口和旧脚本升级 | [Shell](shell.md) |
 | 渲染、按键、字体和选择菜单 | [终端界面](terminal.md) |
 | 主机构建 | [构建](build.md) |

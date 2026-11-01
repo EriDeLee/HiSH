@@ -34,3 +34,10 @@ test('upstream tgz extraction is explicit; APK mode still requires signed packag
  assert.notEqual(run(executable,[file,path.join(dir,'apk')]).status,0);
  assert.equal(run(executable,[file,dest,'tgz']).status,0);assert.equal(fs.readFileSync(path.join(dest,'package/bin/bun'),'utf8'),'actual upstream input');
 });
+test('the Bun source supplies node through Bun node mode without taking the real Node.js path',()=>{
+ const bun=require('../scripts/packages/sources.json').remote.find(r=>r.name==='bun'),node=bun.extra.find(e=>e.path.endsWith('/node'));
+ // Install scripts call node by name. Bun enters node mode when its program name is node.
+ assert.deepEqual(node,{path:'bin/node',content:'#!/bin/sh\nexec -a node bun "$@"\n',mode:448});
+ // A real Node.js package owns usr/bin/node, which precedes bin/ in the session PATH.
+ assert(!bun.extra.some(e=>e.path==='usr/bin/node'));
+});

@@ -99,6 +99,11 @@ void HiSHRunApplet(char **argv)
         if (!system) _exit(125);
         system[0] = "toybox";
         for (int i = 0; i < argc; ++i) system[i + 1] = argv[i];
+        // Every system applet runs with libhish_exec_bridge.so preloaded: the ones that start
+        // programs reach the Linux loader (execvp, execve, vfork), and all of them see the
+        // emulated symbolic links. Falls back to the plain exec if the preloaded launch
+        // could not start.
+        HiSHExecSystemApplet(system);
         HiSHExecFile("/system/bin/toybox", system);
         fprintf(stderr, "%s: system toybox exec errno=%d (%s)\n", argv[0], errno, strerror(errno));
         _exit(126);

@@ -74,7 +74,10 @@ inline int Doctor(Context& c,bool functional,bool capabilities) {
     const State s=LoadState(c.store); int rc=0;
     Say("generation: "+(s.exists?s.id+" "+s.root.string():std::string("none")));
     Say("app manifest: "+c.manifestSha.substr(0,16)+(MigrationPending(c)?" (migration pending)":" (accepted)"));
-    if(fs::exists(c.StateDir()/"migration-error"))Say("last migration error: "+ReadText(c.StateDir()/"migration-error"));
+    if(MigrationPending(c)&&fs::exists(c.StateDir()/"migration-error")){
+        std::string why=ReadText(c.StateDir()/"migration-error"); while(!why.empty()&&why.back()=='\n')why.pop_back();
+        Say("last migration error: "+why);
+    }
     if(fs::exists(c.base/"root"))Say("previous layout directory kept: "+(c.base/"root").string());
     if(s.exists)Say(std::string("links: ")+(s.links=="real\n"?"real links":"copied as files (this device refused symlinks)"));
     for(const auto& kv:s.records){

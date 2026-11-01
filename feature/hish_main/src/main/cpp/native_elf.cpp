@@ -11,6 +11,7 @@
 #include "elf_execution_access.h"
 #include "linux_library_path.h"
 #include "elf_abi.h"
+#include "system_applet_env.h"
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -69,6 +70,9 @@ bool ReleaseDormantArkTsCopy(uintptr_t low, uintptr_t high)
     for (const auto& range : release) if (munmap(reinterpret_cast<void*>(range.begin), range.end - range.begin)) return false;
     return true;
 }
+// The loader must reach the kernel directly: libhish_exec_bridge.so, preloaded into
+// system applets, exports execve, and a call through libc's name would loop back here.
+long KernelExecve(const char* path,char* const argv[],char* const envp[]){return syscall(SYS_execve,path,argv,envp);}
 std::string LibraryDir()
 {
     Dl_info info{};
@@ -82,22 +86,34 @@ const Tool* Lookup(const char* name)
     return nullptr;
 }
 bool Range(uint64_t start,uint64_t count,uint64_t size){return start<=size&&count<=size-start;}
+// Exact positional read. A file that ends early is a malformed ELF, never partial input.
+bool ReadAt(int fd,void* data,size_t count,uint64_t offset)
+{
+    size_t at=0;
+    while(at<count){const auto n=pread(fd,static_cast<unsigned char*>(data)+at,count-at,offset+at);if(n<0&&errno==EINTR)continue;if(n<=0){if(!n)errno=ENOEXEC;return false;}at+=n;}
+    return true;
+}
+// Only the headers and the interpreter name are read here. Mapping reads each
+// segment from the file straight into the image, so no whole-file copy is kept.
 struct Image {
-    int fd=-1; std::vector<unsigned char> bytes; Elf64_Ehdr header{};std::vector<Elf64_Phdr> ph;std::string interpreter;
+    int fd=-1; uint64_t size=0; Elf64_Ehdr header{};std::vector<Elf64_Phdr> ph;std::string interpreter;
     ~Image(){if(fd>=0)close(fd);}
     bool Read(const std::string& file)
     {
         fd=open(file.c_str(),O_RDONLY|O_CLOEXEC);if(fd<0)return Fail("open ELF",errno);
-        struct stat st{};if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<sizeof(header)||st.st_size>128*1024*1024)return Fail("ELF file bounds",ENOEXEC);
-        bytes.resize(st.st_size);size_t at=0;
-        while(at<bytes.size()){const auto n=pread(fd,bytes.data()+at,bytes.size()-at,at);if(n<0&&errno==EINTR)continue;if(n<=0)return Fail("read ELF",n<0?errno:ENOEXEC);at+=n;}
-        memcpy(&header,bytes.data(),sizeof(header));
+        struct stat st{};if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<static_cast<off_t>(sizeof(header))||st.st_size>512*1024*1024)return Fail("ELF file bounds",ENOEXEC);
+        size=static_cast<uint64_t>(st.st_size);
+        if(!ReadAt(fd,&header,sizeof(header),0))return Fail("read ELF header",errno);
         if(memcmp(header.e_ident,ELFMAG,SELFMAG)||header.e_ident[EI_CLASS]!=ELFCLASS64||header.e_ident[EI_DATA]!=ELFDATA2LSB||header.e_ident[EI_VERSION]!=EV_CURRENT||
             header.e_version!=EV_CURRENT||header.e_machine!=EM_AARCH64||(header.e_type!=ET_DYN&&header.e_type!=ET_EXEC)||header.e_phentsize!=sizeof(Elf64_Phdr)||
-            !header.e_phnum||header.e_phnum>128||!Range(header.e_phoff,uint64_t(header.e_phnum)*sizeof(Elf64_Phdr),bytes.size()))return Fail("unsupported ELF format",ENOEXEC);
-        ph.resize(header.e_phnum);memcpy(ph.data(),bytes.data()+header.e_phoff,ph.size()*sizeof(Elf64_Phdr));
+            !header.e_phnum||header.e_phnum>128||!Range(header.e_phoff,uint64_t(header.e_phnum)*sizeof(Elf64_Phdr),size))return Fail("unsupported ELF format",ENOEXEC);
+        ph.resize(header.e_phnum);if(!ReadAt(fd,ph.data(),ph.size()*sizeof(Elf64_Phdr),header.e_phoff))return Fail("read ELF program headers",errno);
         for(const auto& p:ph){
-            if(p.p_type==PT_INTERP){if(!interpreter.empty()||!p.p_filesz||p.p_filesz>4096||!Range(p.p_offset,p.p_filesz,bytes.size())||bytes[p.p_offset+p.p_filesz-1])return Fail("ELF interpreter",ENOEXEC);interpreter.assign(reinterpret_cast<char*>(bytes.data()+p.p_offset),p.p_filesz-1);}
+            if(p.p_type==PT_INTERP){
+                if(!interpreter.empty()||!p.p_filesz||p.p_filesz>4096||!Range(p.p_offset,p.p_filesz,size))return Fail("ELF interpreter",ENOEXEC);
+                std::string name(p.p_filesz,'\0');if(!ReadAt(fd,name.data(),name.size(),p.p_offset))return Fail("read ELF interpreter",errno);
+                if(name.back())return Fail("ELF interpreter",ENOEXEC);name.pop_back();interpreter=std::move(name);
+            }
             if(p.p_type==PT_GNU_STACK&&(p.p_flags&PF_X))return Fail("executable stack unsupported",EACCES);
         }
         return true;
@@ -117,13 +133,13 @@ struct Mapping {
         const size_t page=sysconf(_SC_PAGESIZE);uint64_t low=UINT64_MAX,high=0,alignment=page;
         bool executableEntry=false;
         for(const auto& p:image.ph)if(p.p_type==PT_LOAD&&p.p_memsz){
-            if(p.p_filesz>p.p_memsz||!Range(p.p_offset,p.p_filesz,image.bytes.size())||p.p_memsz>UINT64_MAX-page||p.p_vaddr>UINT64_MAX-p.p_memsz-page||p.p_align>(1ULL<<24)||
+            if(p.p_filesz>p.p_memsz||!Range(p.p_offset,p.p_filesz,image.size)||p.p_memsz>UINT64_MAX-page||p.p_vaddr>UINT64_MAX-p.p_memsz-page||p.p_align>(1ULL<<24)||
                 (p.p_align&&((p.p_align&(p.p_align-1))||p.p_offset%p.p_align!=p.p_vaddr%p.p_align))||p.p_offset%page!=p.p_vaddr%page)return Fail("ELF segment bounds/alignment",ENOEXEC);
             if((p.p_flags&PF_X)&&((p.p_flags&PF_W)||p.p_filesz!=p.p_memsz))return Fail("writable or zero-filled executable segment unsupported",EACCES);
             low=std::min(low,p.p_vaddr&~uint64_t(page-1));high=std::max(high,(p.p_vaddr+p.p_memsz+page-1)&~uint64_t(page-1));alignment=std::max(alignment,p.p_align);
             if((p.p_flags&PF_X)&&image.header.e_entry>=p.p_vaddr&&image.header.e_entry-p.p_vaddr<p.p_filesz)executableEntry=true;
         }
-        if(high<=low||high-low>256*1024*1024||!executableEntry)return Fail("ELF image size/entry",ENOEXEC);
+        if(high<=low||high-low>512*1024*1024||!executableEntry)return Fail("ELF image size/entry",ENOEXEC);
         size=high-low;
         if(image.header.e_type==ET_EXEC){
             const int reservationFlags=MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE;
@@ -165,19 +181,19 @@ struct Mapping {
                 // Bounds/alignment were checked before mapping, and the rest stays zero.
                 hish::ExecutablePatch patch{reinterpret_cast<uintptr_t>(target),std::vector<unsigned char>(end-begin)};
                 const uint64_t offset=p.p_offset&~uint64_t(page-1),bytes=p.p_offset-offset+p.p_filesz;
-                memcpy(patch.bytes.data(),image.bytes.data()+offset,bytes);patches.push_back(std::move(patch));result=target;
+                if(!ReadAt(image.fd,patch.bytes.data(),bytes,offset))return Fail("read ELF code",errno);patches.push_back(std::move(patch));result=target;
             }
             else
 #endif
             if(p.p_flags&PF_X){
                 const uint64_t offset=p.p_offset&~uint64_t(page-1),bytes=p.p_offset-offset+p.p_filesz;
                 const char* stage=nullptr;
-                result=HishMapELFCode(target,end-begin,protection,image.fd,offset,bytes,image.bytes.data()+offset,&stage);
+                result=HishMapELFCode(target,end-begin,protection,image.fd,offset,bytes,nullptr,&stage);
                 if(result==MAP_FAILED)return Fail(stage,errno);
             }
             else{
                 result=mmap(target,end-begin,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0);
-                if(result!=MAP_FAILED){memcpy(reinterpret_cast<void*>(bias+p.p_vaddr),image.bytes.data()+p.p_offset,p.p_filesz);if(mprotect(result,end-begin,protection))return Fail("protect ELF data",errno);}
+                if(result!=MAP_FAILED){if(!ReadAt(image.fd,reinterpret_cast<void*>(bias+p.p_vaddr),p.p_filesz,p.p_offset))return Fail("read ELF data",errno);if(mprotect(result,end-begin,protection))return Fail("protect ELF data",errno);}
             }
             if(result==MAP_FAILED)return Fail("map ELF segment",errno);
             if(image.header.e_phoff>=p.p_offset&&Range(image.header.e_phoff-p.p_offset,uint64_t(image.header.e_phnum)*sizeof(Elf64_Phdr),p.p_filesz))phdr=bias+p.p_vaddr+image.header.e_phoff-p.p_offset;
@@ -345,7 +361,19 @@ extern "C" int HiSHExecNativeApplet(char* const argv[])
     clean.push_back("HISH_EXEC_BRIDGE_FD="+std::to_string(request));
     std::vector<char*> pointers;for(auto& value:clean)pointers.push_back(value.data());pointers.push_back(nullptr);
     char* bootstrap[]={const_cast<char*>("toybox"),const_cast<char*>("hish-exec-bridge-not-entered"),nullptr};
-    execve("/system/bin/toybox",bootstrap,pointers.data());saved=errno;close(request);close(pinned);errno=saved;return -1;
+    KernelExecve("/system/bin/toybox",bootstrap,pointers.data());saved=errno;close(request);close(pinned);errno=saved;return -1;
+}
+// Runs a system Toybox applet that starts other programs with this app's execvp and
+// vfork preloaded (exec_bridge.cpp), so the programs it starts can be Linux ELFs.
+// Returns -1 with errno set only when the kernel exec itself failed.
+extern "C" int HiSHExecSystemApplet(char* const argv[])
+{
+    if(!argv||!argv[0]){errno=ENOENT;return -1;}
+    const auto libraries=LibraryDir();if(libraries.empty()){errno=ENOENT;return -1;}
+    auto environment=HishSystemAppletEnvironment(environ,libraries);
+    std::vector<char*> pointers;for(auto& value:environment)pointers.push_back(value.data());pointers.push_back(nullptr);
+    KernelExecve("/system/bin/toybox",argv,pointers.data());
+    return -1;
 }
 extern "C" int HiSHExecFile(const char* path,char* const argv[])
 {
@@ -393,7 +421,7 @@ extern "C" int HiSHExecFile(const char* path,char* const argv[])
             !strncmp(environ[i],"LD_AUDIT=",9)||!strncmp(environ[i],"GLIBC_TUNABLES=",14))continue;
         kernelEnvironment[count++]=environ[i];
     }
-    kernelEnvironment[count]=nullptr;execve(path,argv,kernelEnvironment);const int kernelError=errno;
+    kernelEnvironment[count]=nullptr;KernelExecve(path,argv,kernelEnvironment);const int kernelError=errno;
     if(kernelError!=EACCES&&kernelError!=ENOEXEC&&kernelError!=ENOENT)return -1;
     try{
         if(HishELFExecutionAccess(path,LibraryDir().c_str())){Fail("target executable permission",errno);return -1;}

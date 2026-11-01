@@ -201,3 +201,19 @@ extern "C" int HiSHPackageSession(char* buffer,unsigned capacity) {
     (void)buffer;(void)capacity;return -1;
 #endif
 }
+// The public CA bundle that pkg verifies its own downloads with. Linux programs
+// hard-code /etc/ssl/certs/ca-certificates.crt, which does not exist here, so the
+// session points their environment at this file instead.
+extern "C" int HiSHPackageCertificates(char* buffer,unsigned capacity) {
+#if defined(__aarch64__)
+    try {
+        const fs::path boot=Base()/("bootstrap-" HISH_PACKAGE_BOOTSTRAP_SHA256);
+        const std::string file=(boot/"etc/ssl/certs/ca-certificates.crt").string();
+        struct stat info{};
+        if(!BootstrapIntact(boot)||stat(file.c_str(),&info)||!S_ISREG(info.st_mode)||file.size()>=capacity)return -1;
+        memcpy(buffer,file.c_str(),file.size()+1);return 0;
+    } catch(...){return -1;}
+#else
+    (void)buffer;(void)capacity;return -1;
+#endif
+}

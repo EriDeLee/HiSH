@@ -23,9 +23,15 @@ Linux 调用方经 `exec_bridge.cpp`、`exec_bridge_shared.h` 将有界参数和
 
 执行系统 OHOS 工具前清理 Linux 的 LD_PRELOAD/LD_LIBRARY_PATH。内核 `/proc/self/exe` 仍可能显示引导 Toybox；兼容层只对已实现的公开 readlink/open/exec 提供逻辑镜像。
 
+## 系统小程序预加载
+
+系统 `/system/bin/toybox` 里会启动其他程序的小程序（`env`、`timeout`、`nice`、`nohup`、`setsid`、`taskset`、`time`、`find`）用系统 libc 的 `execvp`/`execve`，内核不会执行应用目录里的 Linux 程序；其余小程序用系统 libc 的文件函数，看不到模拟的符号链接（见 [符号链接](symlinks.md)）。`shell_module.c` 因此让每一个系统小程序都改用 `HiSHExecSystemApplet`：带着 `LD_PRELOAD=libhish_exec_bridge.so` 内核执行系统 Toybox，没有名单。该库导出 `execvp`、`execve`（`env` 自己按 PATH 搜索后调用它）和 `vfork`。前两个转入 `HiSHExecFile`，由它决定交给内核（OHOS 程序）还是本装载器（Linux 程序）；`vfork` 改为 `fork`，因为 vfork 子进程与父进程共享内存，而装载器会改写进程映像。同一个库还带着链接层的导出副本，由库的构造函数在确认是系统小程序后打开，在内核 exec 桥的引导进程里保持关闭。
+
+预加载和库路径只是该进程自己启动所需。调用者原有的 `LD_*`、`GLIBC_TUNABLES` 改名为 `HISH_SAVED_*` 同行，库的构造函数在小程序 `main` 之前改回原名并删除标记 `HISH_SYSTEM_APPLET`（`system_applet_env.h`，主机测试覆盖往返），所以被启动的程序看到的环境与直接启动一致。HiSH 自己的装载代码用 `syscall(SYS_execve)` 进入内核，不经过这个被替换的符号，否则会循环。预加载启动失败时退回普通启动，小程序仍能运行但不能启动 Linux 程序。`env -i` 会清掉 `HISH_PACKAGE_ROOT`，随包程序因此找不到库；直接去掉该变量结果相同，与本机制无关。
+
 `HISH_KERNEL_EXEC_BRIDGE=0` 是旧直接跳转对照，保留原映射，多线程时返回 ENOTSUP。默认桥也不等于完整 Linux exec；隐藏 libc、直接 syscall 和静态程序内部调用仍需独立验证。
 
-普通 ELF 文件上限为128MiB，映像上限仍为256MiB。逻辑镜像通过已打开文件的 procfs 描述符解析为绝对路径，覆盖 `./program` 调用；否则合作式 readlink 和 Bun 的 `process.execPath` 会退回引导 Toybox。原始 syscall 查询仍显示内核镜像。
+普通 ELF 文件与映像上限均为 512MiB，直接运行、Linux 调用方 exec 和 PRoot 三个装载入口一致。装载只读 ELF 头、程序头和解释器名，各段从文件直接读入映像，不保留整文件副本。逻辑镜像通过已打开文件的 procfs 描述符解析为绝对路径，覆盖 `./program` 调用；否则合作式 readlink 和 Bun 的 `process.execPath` 会退回引导 Toybox。原始 syscall 查询仍显示内核镜像。
 
 ## musl
 
@@ -36,6 +42,8 @@ Linux 调用方经 `exec_bridge.cpp`、`exec_bridge_shared.h` 将有界参数和
 库搜索由 `linux_library_path.h` 共用：随包运行库优先，显式应用私有绝对目录其次，然后是本进程 `HISH_PACKAGE_ROOT` 代次的 `usr/lib`、`lib`，`native/usr/lib/musl` 最后。realpath 后拒绝相对、空项及 native 根之外的目录；列表上限 32768 字节。此规则不是对同 UID 任意原生代码的隔离承诺。
 
 当前 DSO 路径限制包括 4KiB 页、64MiB 文件、256MiB 映像、16MiB 对齐，不接受 W+X、代码 BSS、TEXTREL、可执行栈或重叠段页。
+
+依赖 `libc.so.6`、`ld-linux-aarch64.so.1` 或 `libc++.so` 的 DSO 一律在重定位和构造函数之前拒绝。`libc.so` 既是 OHOS libc 的名字，也是 musl 的标准名：DSO 位于 HAP 库目录、`/data/storage/el1/bundle` 或应用存储 `/data/storage` 之外时视为 OHOS ABI 库并拒绝，读不到来源也拒绝；其他位置按上游 musl 解析为本 loader 自身，例如 Zig 构建、由 Bun 解出到 TMPDIR 的 opencode 界面库。拒绝的 errno 为 ELIBBAD，musl 没有它的文案，`dlerror` 显示 `No error information`。
 
 ## glibc
 
