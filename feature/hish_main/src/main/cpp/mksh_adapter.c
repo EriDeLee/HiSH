@@ -15,6 +15,8 @@ int HiSHMkshExecve(const char *path, char *const argv[], char *const envp[])
     environ = (char **)envp;
     int result = HiSHExecFile(path, argv);
     int saved = errno;
+    const char *stage = HiSHExecError();
+    if (result < 0 && stage && *stage) dprintf(2, "HiSH: cannot start %s: %s\n", path, stage);
     environ = old;
     errno = saved;
     return result;

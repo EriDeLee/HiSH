@@ -1,8 +1,25 @@
 # 验收状态
 
-更新：2026-11-01。包内容、源码状态和手机状态分别记录。
+更新：2026-11-05。包内容、源码状态和手机状态分别记录。
 
-## 当前：epoll 修正，opencode 空闲 CPU 从约 200% 降到约 2%（2026-11-01）
+## 当前：完整复测，一次 Linux 程序起不来，启动失败报错带阶段名（2026-11-05）
+
+- 复测（build-10，device-14）：主机 101 项加 `native-session` 27 项加 `terminal-codec` 3 项通过。手机上 epoll 检查（musl 31、glibc 31，`HISH_EPOLL=0` 对照各 15 项失败）、Bun 综合（管道 9/9 空闲 2.7%，终端 9/9 空闲 3.5%，对照 201.0%）、Bun 33 项、`bun install opencode-ai` 13 秒 0 个符号链接错误、链接检查（musl 47、glibc 32）、系统命令、辅助命令、git/curl/https、opencode 的 grep/glob/read/edit，与 11-01 的结果一致，只有时间戳、代次名、计时、文件列出顺序不同。opencode 界面空闲 11 个窗口中位 2.0%（0.8 到 3.0），输入和 `/exit` 正常。
+- 异常：复测开始时，包里所有 Linux 程序（bun、git、jq、rg，以及 11-01 编的检查程序）启动都报 `Invalid argument`（shell 退出码 126），内置命令和界面正常。
+  - 已知：重启手机前后一样；内存充足（可用 5.3 GB）；包和 HAP 没变（build-10，文件都在）；调试 profile 有效期 2026-06-20 到 2027-06-20，未过期。
+  - 恢复：我先后做了：拉起应用、读日志和进程、几个只写临时文件的诊断脚本、`pkg doctor --functional --capabilities`（会实际执行 bun、jq、zstd、proot 的探针）、你重启一次。其后第一次输入 `bun --version` 成功。时间、重启、探针三者的作用无法区分。
+  - 未查明：具体哪一步返回 EINVAL。11-01 之前的记录（见“前轮：代次化包管理器重构”）里有一次类似现象，那次也是自行恢复且未查明；两次是否同一原因未知，匿名可执行内存的 `mprotect` 返回 EINVAL 只是那次的现象，不能当作这次的原因。
+  - mksh 报告执行失败时只用 `errno`（`third_party/mksh/exec.c`），不读 HiSH 记录的阶段名，所以那次的屏幕上没有阶段信息；`pkg` 的路径会打印阶段名，但那次它跑得起来。
+  - 下次出现时建议：先不要跑 `pkg doctor`，隔几分钟只重试 `bun --version`，以区分是不是时间的作用；然后看新的阶段名。
+- 改动（build-11，device-15）：
+  - `mksh_adapter.c`：`HiSHExecFile` 失败时向 stderr 多打一行 `HiSH: cannot start <路径>: <阶段名>`。
+  - `native_elf.cpp`：内核 `execve` 返回 EACCES、ENOEXEC、ENOENT 以外的错误时记下阶段 `kernel execve`（原来直接返回，没有阶段名）。没有改变哪些错误会退到 HiSH 自己的装载器。
+  - 没有加“EINVAL 时退到自己的装载器”：可能撞上同一限制白回退，可能掩盖真问题，可能用错运行时，且无法在电脑上测。
+  - 签名 HAP 11,624,369 字节，SHA256 `b6426130a95934a9143ff7d1cafd8494fa6c2d3d8b1053595acdb45c9a7e5f9e`，`hish-debug.p7b` 签名，覆盖安装，授权只有 INTERNET。
+- 验证（`hish-diag-6.sh`，device-15）：bun、jq 正常；命令不存在（127）、文件无执行权限（126）、目标是目录（126）的输出与以前相同，没有多出行；把 bun 截成 4096 字节后启动，屏幕上出现 `HiSH: cannot start …: ELF segment bounds/alignment: Exec format error`。主机 `toybox-exec`、`symlink-emulation`、`epoll-emulation`、`elf-dormant-heap` 共 14 项通过。
+- 未验证：真正的 `Invalid argument` 故障下新阶段名是否有用（故障已恢复，无法复现）；build-11 上没有重跑完整回归，只做了上面几项；其他手机或系统版本；启动自检或提示条尚未做。
+
+## 前轮：epoll 修正，opencode 空闲 CPU 从约 200% 降到约 2%（2026-11-01）
 
 - 修改（设计和限制见 [epoll 修正](epoll.md)）：
   - `linux/epoll.c` 和 `hish_epoll_core.h`：两个 Linux 预加载库（musl 的 `libhish_linux_identity_padded.so`、glibc 的 `libhish_linux_glibc_tty.so`）模拟 `EPOLLONESHOT`；`epoll_pwait2` 和 `syscall(441)` 转成 `epoll_pwait`（始终开启）；`HISH_EPOLL=0` 关闭模拟，`HISH_EPOLL=1` 强制开启，默认首次出现一次性登记时自测内核。`linux/links.c` 的 `syscall()` 先问 `hish_epoll_syscall`（弱引用）。

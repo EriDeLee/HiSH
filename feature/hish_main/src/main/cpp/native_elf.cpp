@@ -422,7 +422,7 @@ extern "C" int HiSHExecFile(const char* path,char* const argv[])
         kernelEnvironment[count++]=environ[i];
     }
     kernelEnvironment[count]=nullptr;KernelExecve(path,argv,kernelEnvironment);const int kernelError=errno;
-    if(kernelError!=EACCES&&kernelError!=ENOEXEC&&kernelError!=ENOENT)return -1;
+    if(kernelError!=EACCES&&kernelError!=ENOEXEC&&kernelError!=ENOENT){Fail("kernel execve",kernelError);return -1;}
     try{
         if(HishELFExecutionAccess(path,LibraryDir().c_str())){Fail("target executable permission",errno);return -1;}
         return Execute(path,argv,Runtime::Automatic);
